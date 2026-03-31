@@ -1,12 +1,13 @@
 {
-  "excludeNames": [
-    "United States of America",
-    "Puerto Rico",
-    "Guam",
-    "American Samoa",
-    "United States Virgin Islands"
-  ],
-  "renames": {
-    "Georgia": "Georgia (US State)"
-  }
+	"excludeNames": [
+		"United States of America",
+		"Puerto Rico",
+		"Guam",
+		"American Samoa",
+		"United States Virgin Islands",
+		"Australia"
+	],
+	"renames": {
+		"Georgia": "Georgia (US State)"
+	}
 }
