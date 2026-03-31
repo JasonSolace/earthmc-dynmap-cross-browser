@@ -2,10 +2,13 @@
 //console.log('emcdynmapplus: loaded httputil')
 
 const PROJECT_URL = `https://github.com/JasonSolace/earthmc-dynmap-cross-browser`
+// Archive mode currently relies on this third-party relay in practice because
+// direct Wayback fetches are not consistently reliable in the extension/userscript
+// runtime context. Keep the behavior documented in README and treat it as
+// compatibility debt rather than a hidden implementation detail.
 const PROXY_URL = `https://api.codetabs.com/v1/proxy/?quest=`
 
 const EMC_DOMAIN = "earthmc.net"
-const CURRENT_MAP = "aurora"
 
 const CAPI_BASE = `https://emcstats.bot.nu`
 const MAPI_BASE = `https://map.${EMC_DOMAIN}`
@@ -13,6 +16,14 @@ const OAPI_BASE = `https://api.${EMC_DOMAIN}/v3` // bump number here after migra
 
 const OAPI_REQ_PER_MIN = 180
 const OAPI_ITEMS_PER_REQ = 100
+
+const getCurrentOapiUrl = (resourcePath = '') =>
+	globalThis.EMCDYNMAPPLUS_MAP?.getMapApiUrl?.(OAPI_BASE, resourcePath)
+		?? `${OAPI_BASE}/aurora${resourcePath ? `/${String(resourcePath).replace(/^\/+/, '')}` : ''}`
+
+const getCurrentCapiUrl = (resourcePath = '') =>
+	globalThis.EMCDYNMAPPLUS_MAP?.getMapApiUrl?.(CAPI_BASE, resourcePath)
+		?? `${CAPI_BASE}/aurora${resourcePath ? `/${String(resourcePath).replace(/^\/+/, '')}` : ''}`
 
 /**
  * Token/leaky bucket implementation with localStorage caching.\
@@ -105,7 +116,7 @@ const postJSON = (url, body) => fetchJSON(url, { body: JSON.stringify(body), met
  * Fetches an info object from the Official API base endpoint.
  * @returns {Promise<ServerInfo>}
  */
-const fetchServerInfo = async () => fetchJSON(`${OAPI_BASE}/${CURRENT_MAP}`)
+const fetchServerInfo = async () => fetchJSON(getCurrentOapiUrl())
 
 /**
  * Sends multiple requests and concatenates the results to circumvent 

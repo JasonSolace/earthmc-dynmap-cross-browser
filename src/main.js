@@ -12,6 +12,15 @@ waitForElement('.leaflet-nameplate-pane').then(element => {
 	})
 })
 
+waitForElement('.leaflet-popup-pane').then(element => {
+	element.addEventListener('click', event => {
+		const target = event.target instanceof Element ? event.target.closest('.resident-clickable') : null
+		const playerName = target?.textContent?.trim() ?? ''
+		if (!playerName) return
+		lookupPlayer(playerName)
+	})
+})
+
 /** @type {Array<ParsedMarker>} */
 let parsedMarkers = []
 
@@ -31,18 +40,62 @@ const cachedArchives = new Map()
 const pendingArchiveLoads = new Map()
 
 /** @typedef {typeof MAP_MODES[number]} MapMode */
-const MAP_MODES = /** @type {const} */ (["default", "overclaim", "nationclaims", "meganations", "alliances"])
-const BORDER_CHUNK_COORDS = { 
-	L: -33280, R: 33088,
-	U: -16640, D: 16512
-}
-
+const MAP_MODES = /** @type {const} */ (["default", "planning", "overclaim", "nationclaims", "meganations", "alliances"])
 const EXTRA_BORDER_OPTS = {
 	label: "Country Border",
 	opacity: 0.5,
 	weight: 3,
 	color:  "#000000",
 	markup: false,
+}
+
+const getCurrentDetectedMapType = () => globalThis.EMCDYNMAPPLUS_MAP?.getCurrentMapType?.() ?? 'aurora'
+const getCurrentBordersResourcePath = () => globalThis.EMCDYNMAPPLUS_MAP?.getBorderResourcePath?.() ?? 'resources/borders.aurora.json'
+const getCurrentChunkBounds = () => globalThis.EMCDYNMAPPLUS_MAP?.getChunkBounds?.(getCurrentDetectedMapType()) ?? {
+	L: -33280,
+	R: 33088,
+	U: -16640,
+	D: 16512,
+}
+const shouldInjectDynmapPlusChunksLayer = () =>
+	globalThis.EMCDYNMAPPLUS_MAP?.shouldInjectDynmapPlusChunksLayer?.(getCurrentDetectedMapType()) ?? true
+const getArchiveMarkersSourceUrl = (date) => globalThis.EMCDYNMAPPLUS_MAP?.getArchiveMarkersSourceUrl?.(date)
+	?? (
+		date < 20230212 ? 'https://earthmc.net/map/aurora/tiles/_markers_/marker_earth.json'
+		: date < 20240701 ? 'https://earthmc.net/map/aurora/standalone/MySQL_markers.php?marker=_markers_/marker_earth.json'
+		: 'https://map.earthmc.net/tiles/minecraft_overworld/markers.json'
+	)
+const getNationClaimBonus = (numNationResidents) =>
+	globalThis.EMCDYNMAPPLUS_MAP?.getNationClaimBonus?.(numNationResidents, getCurrentDetectedMapType()) ?? 0
+
+function getUserscriptBorders() {
+	if (typeof BORDERS_BY_MAP !== 'undefined') {
+		return BORDERS_BY_MAP[getCurrentDetectedMapType()] ?? BORDERS_BY_MAP.aurora ?? null
+	}
+
+	if (typeof BORDERS !== 'undefined') return BORDERS
+	return null
+}
+
+function isDynmapPlusManagedLayerDataEntry(entry) {
+	if (!entry || typeof entry !== 'object') return false
+	return entry.id === 'chunks'
+		|| entry.id === 'borders'
+		|| entry.id === 'planning-nations'
+}
+
+function stripDynmapPlusManagedLayers(data) {
+	return data.filter(entry => !isDynmapPlusManagedLayerDataEntry(entry))
+}
+
+function appendDynmapPlusManagedLayer(data, definition, layerEntry) {
+	const nextData = data.filter(entry => entry?.id !== definition.id && entry?.name !== definition.name)
+	nextData.push({
+		...layerEntry,
+		name: definition.name,
+		id: definition.id,
+	})
+	return nextData
 }
 
 // Black
@@ -159,6 +212,44 @@ function pointInPolygon(vertex, polygon) {
 const roundToNearest16 = n => Math.round(n / 16) * 16
 
 /**
+ * Splits one stored border entry into one or more polyline segments.
+ * `null`/`NaN` separators are treated as breaks so one country can store
+ * multiple Polygon/MultiPolygon exterior rings without stray bridge lines.
+ * @param {{x: Array<number|null>, z: Array<number|null>}} line
+ * @returns {Array<Polygon>}
+ */
+function borderEntryToPolylines(line) {
+	/** @type {Array<Polygon>} */
+	const segments = []
+	/** @type {Polygon} */
+	let current = []
+	const length = Math.max(line?.x?.length ?? 0, line?.z?.length ?? 0)
+
+	for (let i = 0; i < length; i++) {
+		const rawX = line?.x?.[i]
+		const rawZ = line?.z?.[i]
+		if (rawX == null || rawZ == null) {
+			if (current.length > 1) segments.push(current)
+			current = []
+			continue
+		}
+
+		const x = Number(rawX)
+		const z = Number(rawZ)
+		if (!Number.isFinite(x) || !Number.isFinite(z)) {
+			if (current.length > 1) segments.push(current)
+			current = []
+			continue
+		}
+
+		current.push({ x, z })
+	}
+
+	if (current.length > 1) segments.push(current)
+	return segments
+}
+
+/**
  * @param {Polygon} vertices 
  * @returns {Vertex}
  */
@@ -190,6 +281,8 @@ const makePolyline = (linePoints, weight = 1, colour = '#ffffff') => ({
 })
 
 const MARKERS_LOG_PREFIX = 'emcdynmapplus[markers]'
+const MAIN_PENDING_UI_ALERT_KEY = 'emcdynmapplus-pending-ui-alert'
+const MAIN_LAST_LIVE_MAP_MODE_KEY = 'emcdynmapplus-last-live-mapmode'
 
 function isMarkersDebugLoggingEnabled() {
 	try {
@@ -207,14 +300,17 @@ async function getStyledBorders() {
 	if (cachedStyledBorders != null) return cachedStyledBorders
 
 	if (isUserscript()) {
+		const borders = getUserscriptBorders()
+		if (!borders) return null
+
 		cachedStyledBorders = Object.fromEntries(
-			Object.entries(BORDERS).map(([key, border]) => [key, { ...border, ...EXTRA_BORDER_OPTS }])
+			Object.entries(borders).map(([key, border]) => [key, { ...border, ...EXTRA_BORDER_OPTS }])
 		)
 		return cachedStyledBorders
 	}
 
 	if (!pendingBordersLoad) {
-		pendingBordersLoad = fetch(getExtensionURL('resources/borders.json'))
+		pendingBordersLoad = fetch(getExtensionURL(getCurrentBordersResourcePath()))
 			.then(async response => {
 				if (!response.ok) return null
 
@@ -240,7 +336,7 @@ async function getStyledBorders() {
  * @param {MarkersResponse} data - The markers response JSON data. 
  */
 async function modifyMarkers(data) {
-	let result = data
+	let result = stripDynmapPlusManagedLayers(data)
 	const initialMarkerCount = Array.isArray(result?.[0]?.markers) ? result[0].markers.length : 0
 
 	const mapMode = currentMapMode()
@@ -275,8 +371,9 @@ async function modifyMarkers(data) {
 
 	if (mapMode == 'overclaim' && cachedApiNations == null) {
 		markersDebugInfo(`${MARKERS_LOG_PREFIX}: loading overclaim nation cache`)
-		const nlist = await fetchJSON(`${OAPI_BASE}/${CURRENT_MAP}/nations`)
-		const apiNations = await queryConcurrent(`${OAPI_BASE}/${CURRENT_MAP}/nations`, nlist)
+		const nationsUrl = getCurrentOapiUrl('nations')
+		const nlist = await fetchJSON(nationsUrl)
+		const apiNations = await queryConcurrent(nationsUrl, nlist)
 		cachedApiNations = new Map(apiNations.map(n => [n.name.toLowerCase(), n]))
 		markersDebugInfo(`${MARKERS_LOG_PREFIX}: overclaim nation cache loaded`, {
 			count: cachedApiNations.size,
@@ -284,7 +381,9 @@ async function modifyMarkers(data) {
 	}
 
 	parsedMarkers = []
-	result = addChunksLayer(result)
+	if (shouldInjectDynmapPlusChunksLayer()) {
+		result = addChunksLayer(result)
+	}
 	markersDebugInfo(`${MARKERS_LOG_PREFIX}: chunks layer added`, {
 		layerCount: Array.isArray(result) ? result.length : null,
 	})
@@ -367,7 +466,7 @@ async function modifyMarkers(data) {
 
 /** @param {MarkersResponse} data - The markers response JSON data. */
 function addChunksLayer(data) {
-	const { L, R, U, D } = BORDER_CHUNK_COORDS
+	const { L, R, U, D } = getCurrentChunkBounds()
 	const ver = (x) => [{ x, z: U }, { x, z: D }, { x, z: U }]
 	const hor = (z) => [{ x: L, z }, { x: R, z }, { x: L, z }]
 	
@@ -376,16 +475,14 @@ function addChunksLayer(data) {
 	for (let x = L; x <= R; x += 16) chunkLines.push(ver(x))
 	for (let z = U; z <= D; z += 16) chunkLines.push(hor(z))
 
-	const nextData = data.slice()
-	nextData[2] = {
-		'name': 'Chunks',
-		'id': 'chunks',
+	return appendDynmapPlusManagedLayer(data, {
+		name: 'Chunks',
+		id: 'chunks',
+	}, {
 		'hide': true,
 		'control': true,
 		'markers': [makePolyline(chunkLines, 0.33, '#000000')]
-	}
-
-	return nextData
+	})
 }
 
 /**
@@ -394,29 +491,17 @@ function addChunksLayer(data) {
  */
 function addCountryBordersLayer(data, borders) {
 	try {
-		const points = Object.keys(borders).map(country => {
-			/** @type {Polygon} */
-			const countryPoly = []
-			const line = borders[country]
-			for (let i = 0; i < line.x.length; i++) {
-				if (!isNumeric(line.x[i])) continue
-				countryPoly.push({ x: line.x[i], z: line.z[i] })
-			}
+		const points = Object.values(borders).flatMap(line => borderEntryToPolylines(line))
 
-			return countryPoly
-		})
-
-		const nextData = data.slice()
-		nextData[3] = {
-			'name': 'Country Borders',
-			'id': 'borders',
+		return appendDynmapPlusManagedLayer(data, {
+			name: 'Country Borders',
+			id: 'borders',
+		}, {
 			'order': 999,
 			'hide': true,
 			'control': true,
 			'markers': [makePolyline(points)]
-		}
-
-		return nextData
+		})
 	} catch (e) {
 		showAlert(`Could not set up a layer of country borders. You may need to clear this website's data. If problem persists, contact the developer.`)
 		console.error(e)
@@ -656,7 +741,7 @@ async function lookupPlayer(playerName, showOnlineStatus = true) {
 		className: 'leaflet-control-layers leaflet-control',
 		text: 'Loading...',
 	}))
-	const players = await postJSON(`${OAPI_BASE}/${CURRENT_MAP}/players`, { query: [playerName] })
+	const players = await postJSON(getCurrentOapiUrl('players'), { query: [playerName] })
 
 	loading.remove()
 
@@ -818,7 +903,7 @@ function parseColours(colours) {
  * @returns {Promise<Array<CachedAlliance>>}
  */
 async function getAlliances() {
-	const alliances = await fetchJSON(`${CAPI_BASE}/${CURRENT_MAP}/alliances`)
+	const alliances = await fetchJSON(getCurrentCapiUrl('alliances'))
 	if (!alliances) {
 		const cache = JSON.parse(localStorage['emcdynmapplus-alliances'])
 		if (cache == null) {
@@ -883,6 +968,9 @@ function getNationAlliances(nationName, mapMode) {
 
 const getArchiveURL = (date, markersURL) => `https://web.archive.org/web/${date}id_/${markersURL}`
 
+// Archive mode intentionally goes through the configured relay here. Direct
+// Wayback fetches are not currently reliable enough in this runtime context,
+// so preserve this behavior and keep it explicitly documented for maintainers.
 /** @param {string} actualArchiveDate */
 function updateArchiveModeLabel(actualArchiveDate) {
 	const currentMapModeLabel = document.querySelector('#current-map-mode-label')
@@ -891,17 +979,25 @@ function updateArchiveModeLabel(actualArchiveDate) {
 	}
 }
 
+function exitArchiveModeAfterFailure(message, timeout = 8) {
+	try {
+		localStorage['emcdynmapplus-mapmode'] = localStorage[MAIN_LAST_LIVE_MAP_MODE_KEY] || 'default'
+		localStorage[MAIN_PENDING_UI_ALERT_KEY] = JSON.stringify({
+			message,
+			timeout,
+		})
+	} catch {}
+
+	location.reload()
+}
+
 /**
  * @param {number} date
  * @param {MarkersResponse} data
  * @returns {Promise<{ data: MarkersResponse, actualArchiveDate: string } | null>}
  */
 async function loadArchiveForDate(date, data) {
-	// markers.json URL changed over time
-	const markersURL = 
-		date < 20230212 ? "https://earthmc.net/map/aurora/tiles/_markers_/marker_earth.json" :
-		date < 20240701 ? "https://earthmc.net/map/aurora/standalone/MySQL_markers.php?marker=_markers_/marker_earth.json" :
-		"https://map.earthmc.net/tiles/minecraft_overworld/markers.json" // latest
+	const markersURL = getArchiveMarkersSourceUrl(date)
 
 	const archive = await fetchJSON(PROXY_URL + getArchiveURL(date, markersURL))
 	if (!archive) {
@@ -948,7 +1044,6 @@ async function getArchive(data) {
 	loadingAlert.remove()
 
 	if (!archiveResult) {
-		showAlert('Archive service is currently unavailable, please try later.')
 		const cachedArchive = cachedArchives.get(date)
 		if (cachedArchive) {
 			updateArchiveModeLabel(cachedArchive.actualArchiveDate)
@@ -962,6 +1057,7 @@ async function getArchive(data) {
 		console.warn(`${MARKERS_LOG_PREFIX}: archive unavailable and no cached archive exists, returning original markers`, {
 			requestedDate: date,
 		})
+		exitArchiveModeAfterFailure('Unable to communicate with the Wayback archive. Returned to the live map.')
 		return data
 	}
 
@@ -1019,7 +1115,7 @@ function checkOverclaimedNationless(claimedChunks, numResidents) {
 function checkOverclaimed(claimedChunks, numResidents, numNationResidents) {
     const resLimit = numResidents * CHUNKS_PER_RES
 	
-	const bonus = auroraNationBonus(numNationResidents)
+	const bonus = getNationClaimBonus(numNationResidents)
     const totalClaimLimit = resLimit + bonus
     const isOverclaimed = claimedChunks > totalClaimLimit
 	
@@ -1031,12 +1127,3 @@ function checkOverclaimed(claimedChunks, numResidents, numNationResidents) {
 	}
 }
 
-/** @param {number} numNationResidents */
-function auroraNationBonus(numNationResidents) {
-	return numNationResidents >= 200 ? 100
-		: numNationResidents >= 120 ? 80
-		: numNationResidents >= 80 ? 60
-		: numNationResidents >= 60 ? 50
-		: numNationResidents >= 40 ? 30
-		: numNationResidents >= 20 ? 10 : 0
-} 

@@ -8,7 +8,7 @@ If you are new to browser extension development, the short version is:
 2. Run `npm install`.
 3. Build the extension with `npm run extension`.
 4. Load the built extension from `dist/chromium/` or `dist/firefox/`.
-5. Run the automated tests with `npm run test:e2e`.
+5. Optionally run the live browser smoke tests with `npm run test:e2e` after reading `Automated tests` below.
 
 ## What this project does
 
@@ -104,16 +104,22 @@ Available scripts:
 - `npm run extension:chromium`
 - `npm run extension:firefox`
 - `npm run build`
+- `npm run convert:borders:nostra -- <input.geojson> <output.json>`
 
 What they do:
 
 - `userscript`: builds `dist/emc-dynmapplus.user.js`
 - `extension`: builds both browser targets
 - `build`: builds both the userscript and both extension targets
+- `convert:borders:nostra`: converts lon/lat country GeoJSON into Nostra borders JSON using Miller cylindrical projection
 
 ## Automated tests
 
 The Selenium-based end-to-end tests live in `scripts/e2e/`.
+
+These are live browser integration and smoke tests, not deterministic unit tests.
+
+They exercise the built extension against real EarthMC pages and external services, so failures can come from browser setup, driver discovery, page changes, archive availability, or network issues in addition to extension regressions.
 
 Main commands:
 
@@ -202,12 +208,18 @@ Before running e2e tests:
 
 1. Build the correct extension target first.
 2. Make sure the browser exists locally.
-3. Make sure the matching driver exists locally, or allow Selenium Manager to resolve one.
+3. Make sure the matching driver is already discoverable locally.
 
 Examples:
 
 - `npm run extension:chromium` before Chromium tests
 - `npm run extension:firefox` before Firefox tests
+
+Important details:
+
+- Firefox currently requires a locally discoverable `geckodriver`. The launcher checks explicit env vars, some common Windows locations, the Selenium cache, and `PATH`, but it does not download `geckodriver` for you.
+- Chromium tests expect a locally discoverable Chromium-compatible browser plus matching ChromeDriver. The launcher can use explicit env vars, common install locations, the Selenium cache, `.tools/`, or `PATH`.
+- The launcher is Windows-first because several discovery paths and diagnostics are optimized for Windows installs. macOS/Linux runs are best-effort rather than heavily exercised.
 
 ### Environment variables
 
@@ -234,6 +246,15 @@ Advanced override:
 - `CHROMIUM_ALLOW_GOOGLE_CHROME=1`
 
 Use that only if you know exactly why you need it. The default guard exists because branded Google Chrome is not a reliable target for unpacked extension Selenium runs.
+
+### Local E2E override file
+
+The runner loads optional local overrides from:
+
+1. `.env.e2e.local`
+2. `.env.e2e`
+
+Use `.env.e2e.local` for machine-specific test targets or browser paths that should not be committed. Start from `./.env.e2e.example`.
 
 ## What the `archive` e2e test checks
 
@@ -289,6 +310,26 @@ If they are in custom locations, set:
 - `FIREFOX_BINARY_PATH`
 - `GECKODRIVER_PATH`
 
+## External runtime services
+
+This project talks to a few services outside the current page origin. That is normal for the current feature set, but it is worth knowing up front:
+
+- `map.earthmc.net` and `earthmc.net`: live map tiles, markers, and older marker endpoints. Required for normal live map usage.
+- `api.earthmc.net`: official EarthMC API lookups used by live extension features such as player and server data. Required for those live lookup features.
+- `web.archive.org`: historical marker snapshots for archive mode. Archive-only dependency.
+- `api.codetabs.com`: relay used for archive-mode Wayback requests in practice because direct browser/runtime Wayback fetches are not currently reliable enough. Archive-only third-party dependency.
+- `mc-heads.net`: resident avatar images. Best-effort cosmetic dependency.
+- `emcstats.bot.nu`: alliance data used by alliance-related map features. Feature-specific dependency.
+- `fonts.googleapis.com` and `fonts.gstatic.com`: UI font delivery for the bundled styles. Best-effort cosmetic dependency.
+
+### Archive mode relay
+
+Archive mode currently fetches Wayback snapshots through `https://api.codetabs.com/v1/proxy/?quest=` in practice.
+
+This relay is only used for archive mode. Normal live map browsing does not depend on it.
+
+It is a third-party dependency and should be treated as a documented compatibility workaround, not a hidden implementation detail. If a reliable first-party or direct-fetch approach becomes practical later, that would be a better cleanup target than changing behavior ad hoc.
+
 ## Repository layout
 
 Important folders and files:
@@ -328,6 +369,8 @@ The userscript build output is written to:
 - `dist/emc-dynmapplus.user.js`
 
 That build uses this fork's repository metadata rather than the upstream fork metadata.
+
+The tracked userscript file in `dist/` is the published artifact for the current userscript flow, so code changes that affect shipped runtime behavior should be followed by regenerating it.
 
 ## Attribution
 

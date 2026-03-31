@@ -58,11 +58,6 @@ const INSERTABLE_HTML = /** @type {const} */ ({
     scrollableResidentList: '<div class="resident-list" id="scrollable-list">\t{list}</div>',
     partOfLabel: '<span id="part-of-label">Part of <b>{allianceList}</b></span>',
     alertMsg: '<div class="message" id="alert"><p id="alert-message">{message}</p></div>',
-	// Inserted into document <head>
-	interFont: `<link rel="preconnect" href="https://fonts.googleapis.com">
-		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-		<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap">
-	`,
 	darkMode: `<style id="dark-mode">
 		.leaflet-control, #alert,
 		.sidebar-button, .sidebar-input, .leaflet-bar > a,
@@ -318,7 +313,7 @@ function initToggleOptions() {
 }
 
 async function insertScreenshotBtn() {
-	if (isFirefoxBrowser()) return
+	if (!isScreenshotFeatureAvailable()) return
 
 	const linkBtn = await waitForElement(".leaflet-control-layers.link")
 	if (!linkBtn?.parentElement) return
@@ -336,10 +331,32 @@ async function insertScreenshotBtn() {
 
 		try {
 			const canvas = await withInteractionBlocked(screenshotViewport)
-			const blob = await canvas.convertToBlob({ type: 'image/png', quality: 1 })
-			await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
-			
-			showAlert('Screenshot successful. Copied to clipboard!', 5)
+			const blob = await screenshotCanvasToBlob(canvas)
+			let clipboardError = null
+
+			if (canWriteScreenshotToClipboard()) {
+				try {
+					await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+					showAlert('Screenshot successful. Copied to clipboard!', 5)
+					return
+				} catch (error) {
+					clipboardError = error
+					console.warn('Clipboard image write failed, falling back to download.', error)
+				}
+			}
+
+			if (canDownloadScreenshot()) {
+				downloadScreenshotBlob(blob)
+				showAlert(
+					clipboardError
+						? 'Screenshot captured. Clipboard copy failed, so the image was downloaded instead.'
+						: 'Screenshot successful. Download started.',
+					5
+				)
+				return
+			}
+
+			throw clipboardError || new Error('No screenshot output path is available in this browser.')
 		} catch (e) {
 			console.error(e)
 			showAlert('Failed to screenshot/copy to clipboard. Check the console.')
@@ -423,15 +440,6 @@ async function editUILayout() {
     // Fix nameplates appearing over popups
     waitForElement('.leaflet-nameplate-pane').then(el => el.style = '')
 
-	// Listen for click event on a resident clickable and call lookup func with the resident name.
-	// Has to be popup-pane because infowindow gets destroyed.
-	waitForElement('.leaflet-popup-pane').then(el => el.addEventListener('click', e => {
-		/** @type {HTMLElement} */ 
-		const target = e.target
-		if (target.classList.contains("resident-clickable")) {
-			lookupPlayer(target.textContent)
-		}
-	}))
 }
 
 /** 
@@ -470,7 +478,8 @@ function insertLayerOptionsMenu() {
 	return waitForElement('.leaflet-control-layers-list').then(el => {
 		const control = el.closest('.leaflet-control-layers')
 		if (control instanceof HTMLElement) disablePanAndZoom(control)
-		return addOptions(el, currentMapMode())
+		const mapMode = localStorage['emcdynmapplus-mapmode'] ?? 'meganations'
+		return addOptions(el, mapMode)
 	})
 }
 

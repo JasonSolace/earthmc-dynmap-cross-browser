@@ -2,7 +2,7 @@
 	--font-sans: "Manrope", "Segoe UI", sans-serif;
 	--font-display: "Space Grotesk", "Segoe UI", sans-serif;
 	--panel-width: min(292px, calc(100vw - 20px));
-	--player-lookup-width: min(290px, calc(100vw - 20px));
+	--player-lookup-width: min(420px, calc(100vw - 20px));
 	--toast-width: min(420px, calc(100vw - 24px));
 	--control-height: 38px;
 	--radius-sm: 10px;
@@ -25,9 +25,9 @@
 	--success-color: #21754c;
 	--danger-color: #c44f45;
 	--shadow-soft: 0 12px 28px rgba(39, 25, 8, 0.12);
-	--screenshot-bg-image: url("https://raw.githubusercontent.com/Owen3H/earthmc-dynmap/refs/heads/main/resources/icon-screenshot.png");
-	--show-icon: url("https://raw.githubusercontent.com/Owen3H/earthmc-dynmap/refs/heads/main/resources/icon-show.png");
-	--hide-icon: url("https://raw.githubusercontent.com/Owen3H/earthmc-dynmap/refs/heads/main/resources/icon-hide.png");
+	--screenshot-bg-image: none;
+	--show-icon: none;
+	--hide-icon: none;
 }
 
 :root[data-emcdynmapplus-theme="dark"] {
@@ -118,9 +118,11 @@ select {
 
 #sidebar {
 	position: relative;
+	z-index: 1001;
 	width: auto;
 	padding: 0;
 	float: left !important;
+	text-align: left;
 	background: transparent !important;
 	border: none !important;
 	box-shadow: none;
@@ -140,6 +142,7 @@ select {
 	gap: 12px;
 	min-width: 176px;
 	padding: 10px 12px;
+	text-align: left;
 	background: var(--panel-bg) !important;
 	border: 1px solid var(--panel-border) !important;
 	border-radius: var(--radius-md);
@@ -195,14 +198,16 @@ select {
 }
 
 #sidebar-content {
-	position: absolute;
-	top: calc(100% + 8px);
-	left: 0;
+	position: fixed;
+	top: 72px;
+	left: 12px;
+	z-index: 1002;
 	width: var(--panel-width);
-	height: min(430px, calc(100vh - 88px));
+	max-height: min(430px, calc(100vh - 88px));
 	padding: 14px;
 	display: grid;
 	gap: 10px;
+	text-align: left;
 	background: var(--panel-bg) !important;
 	border: 1px solid var(--panel-border) !important;
 	border-radius: var(--radius-md);
@@ -311,9 +316,37 @@ select {
 	border-radius: var(--radius-sm);
 }
 
-#map-mode-section[data-archive-selected="true"] #archive-date-group {
+#map-mode-section[data-archive-active="true"] #archive-date-group {
 	border-color: rgba(209, 137, 45, 0.45);
 	background: linear-gradient(135deg, var(--accent-soft), var(--panel-muted-bg));
+}
+
+.sidebar-archive-panel {
+	gap: 8px;
+}
+
+.sidebar-archive-status {
+	display: grid;
+	gap: 4px;
+}
+
+.sidebar-archive-title {
+	font-size: 16px;
+	font-family: var(--font-display);
+	line-height: 1;
+}
+
+.sidebar-archive-actions {
+	grid-template-columns: 1fr;
+}
+
+.sidebar-archive-actions .sidebar-button {
+	width: 100%;
+}
+
+.sidebar-field-group[hidden],
+.sidebar-button[hidden] {
+	display: none !important;
 }
 
 .sidebar-field-label {
@@ -396,10 +429,127 @@ select {
 	background: var(--surface-elevated);
 }
 
+.sidebar-button-danger {
+	background: linear-gradient(135deg, #a93d2f, #7f2418);
+	color: #fff;
+	border-color: transparent;
+}
+
 .sidebar-action-row {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto;
 	gap: 8px;
+}
+
+.planning-chip-row,
+.planning-actions-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 8px;
+}
+
+.planning-range-control {
+	display: grid;
+	gap: 6px;
+}
+
+.planning-range-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 8px;
+	align-items: center;
+}
+
+.planning-cursor-preview {
+	position: fixed;
+	left: 0;
+	top: 0;
+	z-index: 1400;
+	pointer-events: none;
+	transform: translate(-50%, -50%);
+}
+
+.planning-cursor-preview[hidden] {
+	display: none;
+}
+
+.planning-cursor-preview-ring {
+	width: var(--planning-preview-size, 72px);
+	height: var(--planning-preview-size, 72px);
+	border-radius: 999px;
+	border: 2px solid rgba(209, 137, 45, 0.88);
+	background: rgba(209, 137, 45, 0.08);
+	box-shadow:
+		0 0 0 1px rgba(255, 243, 207, 0.55) inset,
+		0 8px 18px rgba(25, 18, 8, 0.18);
+	display: none;
+}
+
+.planning-cursor-preview-center {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: var(--planning-preview-center-size, 18px);
+	height: var(--planning-preview-center-size, 18px);
+	border-radius: 999px;
+	transform: translate(-50%, -50%);
+	border: 1px solid rgba(31, 18, 0, 0.8);
+	background: rgba(255, 243, 207, 0.76);
+	box-shadow:
+		0 0 0 1px rgba(255, 243, 207, 0.35) inset,
+		0 3px 8px rgba(25, 18, 8, 0.14);
+}
+
+.planning-cursor-preview-label {
+	position: absolute;
+	left: 50%;
+	top: calc(100% + 8px);
+	transform: translateX(-50%);
+	padding: 4px 8px;
+	border-radius: 999px;
+	background: rgba(31, 27, 21, 0.88);
+	color: #fff3cf;
+	font-size: 11px;
+	font-weight: 800;
+	letter-spacing: 0.04em;
+	white-space: nowrap;
+	box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
+	display: none;
+}
+
+:root[data-emcdynmapplus-planning-armed] .leaflet-container {
+	cursor: none !important;
+}
+
+.planning-chip {
+	display: grid;
+	gap: 4px;
+	padding: 10px;
+	background: var(--panel-muted-bg);
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+}
+
+.planning-chip[data-emphasis="true"] {
+	border-color: rgba(209, 137, 45, 0.35);
+	background: linear-gradient(135deg, var(--accent-soft), var(--panel-muted-bg));
+}
+
+.planning-chip-label {
+	font-size: 11px;
+	font-weight: 800;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+
+.planning-chip-value {
+	font-size: 13px;
+	font-weight: 700;
+}
+
+.planning-inline-note {
+	margin: 0;
 }
 
 .sidebar-split {
@@ -421,8 +571,7 @@ select {
 }
 
 #options-menu {
-	display: grid !important;
-	gap: 8px;
+	display: block !important;
 }
 
 .leaflet-control-layers-list {
@@ -526,21 +675,22 @@ select {
 
 .emcdynmapplus-layer-option {
 	display: block;
-	margin-bottom: 4px;
+	margin: 0;
 	color: var(--text-strong);
 }
 
-.emcdynmapplus-layer-option:last-child {
-	margin-bottom: 0;
-}
-
-.emcdynmapplus-layer-option > span {
+.emcdynmapplus-layer-option > span,
+.emcdynmapplus-layer-options label[data-emcdynmapplus-layer-owner="dynmapplus"] > span {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
 }
 
 .emcdynmapplus-layer-checkbox {
+	accent-color: var(--accent-color);
+}
+
+.emcdynmapplus-layer-options input.leaflet-control-layers-selector {
 	accent-color: var(--accent-color);
 }
 
@@ -618,8 +768,8 @@ select {
 .player-lookup-top {
 	display: flex;
 	gap: 12px;
-	align-items: center;
-	padding-right: 76px;
+	align-items: flex-start;
+	padding-right: 104px;
 }
 
 #player-lookup-avatar {
@@ -632,12 +782,14 @@ select {
 .player-lookup-identity {
 	display: grid;
 	gap: 6px;
+	min-width: 0;
 }
 
 #player-lookup-name {
 	font-size: 21px;
 	line-height: 1;
 	font-family: var(--font-display);
+	overflow-wrap: anywhere;
 }
 
 #player-lookup-online {
@@ -660,7 +812,7 @@ select {
 
 .player-lookup-stats {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
+	grid-template-columns: repeat(2, minmax(140px, 1fr));
 	gap: 10px;
 }
 
@@ -668,6 +820,7 @@ select {
 .player-lookup-meta-row {
 	display: grid;
 	gap: 4px;
+	min-width: 0;
 	padding: 12px;
 	background: var(--panel-strong-bg);
 	border: 1px solid var(--panel-border);
@@ -686,6 +839,7 @@ select {
 .player-lookup-stat-value,
 .player-lookup-meta-value {
 	font-size: 15px;
+	overflow-wrap: anywhere;
 }
 
 .player-lookup-meta {

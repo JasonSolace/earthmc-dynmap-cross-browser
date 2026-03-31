@@ -1,7 +1,27 @@
+(() => {
+const INTERCEPTOR_GUARD = "__EMCDYNMAPPLUS_INTERCEPTOR_INITIALIZED__";
+if (window[INTERCEPTOR_GUARD]) {
+	try {
+		if (localStorage["emcdynmapplus-debug"] === "true") {
+			console.info("emcdynmapplus[page]: interceptor already initialized, skipping duplicate injection");
+		}
+	} catch {}
+	return;
+}
+window[INTERCEPTOR_GUARD] = true;
+
 const { fetch: originalFetch } = window;
 const LOG_PREFIX = "emcdynmapplus[page]";
 const MARKER_EVENT_TIMEOUT_MS = 5000;
+const PAGE_TILE_ZOOM_ATTR = "data-emcdynmapplus-tile-zoom";
+const PAGE_TILE_URL_ATTR = "data-emcdynmapplus-tile-url";
+const PAGE_TILE_DOMINANT_ZOOM_ATTR = "data-emcdynmapplus-tile-dominant-zoom";
+const PAGE_TILE_SUMMARY_ATTR = "data-emcdynmapplus-tile-zoom-summary";
+const TILE_HISTORY_WINDOW_MS = 2500;
+const TILE_HISTORY_LIMIT = 80;
 let markerRequestId = 0;
+let lastPublishedTileKey = null;
+let recentTileRequests = [];
 
 function isDebugLoggingEnabled() {
 	try {
@@ -63,6 +83,93 @@ function getResponseUrl(response, fallback = "") {
 	return fallback;
 }
 
+function parseTileRequestInfo(url) {
+	if (typeof url !== "string" || url.length === 0) return null;
+
+	const match = url.match(/\/tiles\/([^/]+)\/(-?\d+)\/(-?\d+)_(-?\d+)\.(png|jpg|jpeg|webp)(?:[?#].*)?$/i);
+	if (!match) return null;
+
+	const [, world, zoomRaw, tileXRaw, tileYRaw] = match;
+	const zoom = Number(zoomRaw);
+	const tileX = Number(tileXRaw);
+	const tileY = Number(tileYRaw);
+	if (!Number.isFinite(zoom) || !Number.isFinite(tileX) || !Number.isFinite(tileY)) return null;
+
+	return {
+		world,
+		zoom,
+		tileX,
+		tileY,
+		url,
+	};
+}
+
+function roundTo3(value) {
+	return Number.isFinite(value) ? Number(value.toFixed(3)) : null;
+}
+
+function summarizeRecentTileRequests(now = Date.now()) {
+	recentTileRequests = recentTileRequests
+		.filter((entry) => now - entry.at <= TILE_HISTORY_WINDOW_MS)
+		.slice(-TILE_HISTORY_LIMIT);
+
+	const zoomCounts = {};
+	for (const entry of recentTileRequests) {
+		const key = String(entry.zoom);
+		zoomCounts[key] = (zoomCounts[key] || 0) + 1;
+	}
+
+	const dominantEntry = Object.entries(zoomCounts)
+		.sort((left, right) => {
+			if (right[1] !== left[1]) return right[1] - left[1];
+			return Number(right[0]) - Number(left[0]);
+		})[0] ?? null;
+	const dominantZoom = dominantEntry ? Number(dominantEntry[0]) : null;
+
+	return {
+		dominantZoom,
+		lastZoom: recentTileRequests.at(-1)?.zoom ?? null,
+		sampleCount: recentTileRequests.length,
+		windowMs: TILE_HISTORY_WINDOW_MS,
+		zoomCounts,
+		lastUrl: recentTileRequests.at(-1)?.url ?? null,
+		lastAt: roundTo3(recentTileRequests.at(-1)?.at ?? null),
+	};
+}
+
+function publishTileRequestState(url, source = "fetch") {
+	const info = parseTileRequestInfo(url);
+	if (!info) return null;
+
+	const tileKey = `${info.world}:${info.zoom}:${info.tileX}:${info.tileY}`;
+	const root = document.documentElement;
+	if (!root) return info;
+	const now = Date.now();
+
+	recentTileRequests.push({
+		at: now,
+		zoom: info.zoom,
+		url: info.url,
+		tileX: info.tileX,
+		tileY: info.tileY,
+		world: info.world,
+	});
+	const summary = summarizeRecentTileRequests(now);
+
+	root.setAttribute(PAGE_TILE_ZOOM_ATTR, String(info.zoom));
+	root.setAttribute(PAGE_TILE_URL_ATTR, info.url);
+	if (summary.dominantZoom != null) {
+		root.setAttribute(PAGE_TILE_DOMINANT_ZOOM_ATTR, String(summary.dominantZoom));
+	}
+	root.setAttribute(PAGE_TILE_SUMMARY_ATTR, JSON.stringify(summary));
+
+	if (tileKey !== lastPublishedTileKey) {
+		lastPublishedTileKey = tileKey;
+	}
+
+	return info;
+}
+
 // Replace the default fetch() with ours to intercept responses
 window.fetch = async (...args) => {
 	const requestUrl = getRequestUrl(args[0]);
@@ -72,6 +179,7 @@ window.fetch = async (...args) => {
 		const responseUrl = getResponseUrl(response, requestUrl);
 		if (!response.ok && response.status != 304) return response;
 		if (responseUrl.includes("web.archive.org")) return response;
+		publishTileRequestState(responseUrl || requestUrl, "fetch-response");
 
 		const isMarkers = responseUrl.includes("markers.json");
 		const isSettings = responseUrl.includes(
@@ -233,3 +341,4 @@ document.addEventListener("EMCDYNMAPPLUS_ADJUST_SCROLL", (e) => {
 		window.L.Map.mergeOptions({ wheelPxPerZoomLevel: adjustedZoom });
 	}
 });
+})();

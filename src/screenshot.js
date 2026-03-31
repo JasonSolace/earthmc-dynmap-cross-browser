@@ -1,6 +1,61 @@
 const queryTileElements = () => document.querySelectorAll(".leaflet-tile-pane .leaflet-layer img.leaflet-tile")
 const nextFrame = () => new Promise(r => requestAnimationFrame(r))
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
+const canUseOffscreenCanvas = () => typeof OffscreenCanvas === 'function'
+const canUseDomCanvas = () => {
+	const canvas = document.createElement('canvas')
+	return typeof canvas.getContext === 'function'
+}
+const canWriteScreenshotToClipboard = () =>
+	typeof ClipboardItem === 'function' && typeof navigator.clipboard?.write === 'function'
+const canDownloadScreenshot = () =>
+	typeof URL?.createObjectURL === 'function'
+	&& typeof URL?.revokeObjectURL === 'function'
+	&& typeof document?.createElement === 'function'
+
+function createScreenshotCanvas(width, height) {
+	if (canUseOffscreenCanvas()) return new OffscreenCanvas(width, height)
+
+	const canvas = document.createElement('canvas')
+	canvas.width = width
+	canvas.height = height
+	return canvas
+}
+
+async function screenshotCanvasToBlob(canvas) {
+	if (typeof canvas?.convertToBlob === 'function') {
+		return canvas.convertToBlob({ type: 'image/png', quality: 1 })
+	}
+
+	if (canvas instanceof HTMLCanvasElement) {
+		return new Promise((resolve, reject) => {
+			canvas.toBlob(blob => {
+				if (blob) return resolve(blob)
+				reject(new Error('Canvas export produced no blob'))
+			}, 'image/png')
+		})
+	}
+
+	throw new Error('Canvas blob export is unavailable in this browser.')
+}
+
+function downloadScreenshotBlob(blob, filename = `earthmc-map-${Date.now()}.png`) {
+	const blobUrl = URL.createObjectURL(blob)
+	const link = document.createElement('a')
+	link.href = blobUrl
+	link.download = filename
+	link.rel = 'noopener'
+	link.style.display = 'none'
+	document.body.appendChild(link)
+	link.click()
+	link.remove()
+	setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
+}
+
+function isScreenshotFeatureAvailable() {
+	return (canUseOffscreenCanvas() || canUseDomCanvas())
+		&& (canWriteScreenshotToClipboard() || canDownloadScreenshot())
+}
 
 /** @param {"low" | "medium" | "high" | null | undefined} antialiasing */
 const screenshotViewport = async (antialiasing = null) => {
@@ -27,8 +82,9 @@ const screenshotViewport = async (antialiasing = null) => {
     }
 
     const resScale = 1.5 // increase canvas resolution
-    const canvas = new OffscreenCanvas(window.innerWidth * resScale, window.innerHeight * resScale)
+    const canvas = createScreenshotCanvas(window.innerWidth * resScale, window.innerHeight * resScale)
     const ctx = canvas.getContext('2d', { alpha: false })
+	if (!ctx) throw new Error('Failed to create a 2D canvas context for screenshot capture.')
 
     ctx.imageSmoothingEnabled = !!antialiasing
     ctx.imageSmoothingQuality = antialiasing || 'low'

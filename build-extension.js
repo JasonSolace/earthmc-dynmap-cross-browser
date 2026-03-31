@@ -99,6 +99,12 @@ async function archiveTarget(target, sourceDir) {
 		const archive = archiver.create('zip', { zlib: { level: 9 } })
 
 		output.on('close', resolve)
+		output.on('error', err => {
+			const details = err?.code ? `${err.code}: ${err.message}` : (err?.message || String(err))
+			reject(new Error(
+				`Could not write ${outfile}. The output file is likely locked by another program (commonly Firefox if the XPI is in use). Close any app using that file and try again.\nUnderlying error: ${details}`
+			))
+		})
 		archive.on('error', reject)
 
 		archive.pipe(output)

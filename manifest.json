@@ -1,7 +1,7 @@
 {
 	"manifest_version": 3,
 	"name": "EarthMC Dynmap+ (Cross-Browser Fork)",
-	"version": "2.0",
+	"version": "2.1.1",
 	"author": "3meraldK",
 	"description": "Extension to enrich the EarthMC map experience",
 	"icons": {
@@ -15,26 +15,33 @@
 			}
 		}
 	},
-	"web_accessible_resources": [{
-		"matches": ["https://map.earthmc.net/*", "https://nostra.earthmc.net/*"],
-		"resources": [
-			"resources/borders.json",
-			"resources/marker-engine.js",
-			"resources/interceptor.js"
-		]
-	}],
-	"content_scripts": [{
-		"matches": ["https://map.earthmc.net/*", "https://nostra.earthmc.net/*"],
-		"run_at": "document_start",
-		"css": ["resources/style.css"],
-		"js": [
-			"src/browser.js",
-			"src/httputil.js",
-			"src/dom.js",
-			"src/screenshot.js",
-			"src/menu.js",
-			"src/main.js",
-			"src/entrypoint.js"
-		]
-	}]
+	"web_accessible_resources": [
+		{
+			"matches": ["https://map.earthmc.net/*", "https://nostra.earthmc.net/*"],
+			"resources": [
+				"resources/map-config.js",
+				"resources/borders.aurora.json",
+				"resources/borders.nostra.json",
+				"resources/marker-engine.js",
+				"resources/interceptor.js"
+			]
+		}
+	],
+	"content_scripts": [
+		{
+			"matches": ["https://map.earthmc.net/*", "https://nostra.earthmc.net/*"],
+			"run_at": "document_start",
+			"css": ["resources/style.css"],
+			"js": [
+				"src/browser.js",
+				"resources/map-config.js",
+				"src/httputil.js",
+				"src/dom.js",
+				"src/screenshot.js",
+				"src/menu.js",
+				"src/main.js",
+				"src/entrypoint.js"
+			]
+		}
+	]
 }

@@ -129,6 +129,30 @@ function printInventory(tests) {
 	}
 }
 
+function formatResultLabel(result) {
+	return `${result.test} on ${result.browser}`;
+}
+
+function summarizeResults(results, selectedBrowsers, selectedTests) {
+	const passedResults = results.filter((result) => result.status === "passed");
+	const failedResults = results.filter((result) => result.status === "failed");
+
+	return {
+		total: results.length,
+		passed: passedResults.length,
+		failed: failedResults.length,
+		browsers: selectedBrowsers.map((entry) => entry.id),
+		tests: selectedTests.map((entry) => entry.id),
+		failedTests: [...new Set(failedResults.map((result) => result.test))],
+		failedRuns: failedResults.map((result) => ({
+			test: result.test,
+			browser: result.browser,
+			durationMs: result.durationMs,
+			error: result.error?.message || String(result.error),
+		})),
+	};
+}
+
 export async function runE2E({
 	browser = "all",
 	test = "all",
@@ -181,22 +205,22 @@ export async function runE2E({
 		}
 	}
 
-	const passed = results.filter((result) => result.status === "passed").length;
-	const failed = results.length - passed;
+	const summary = summarizeResults(results, selectedBrowsers, selectedTests);
 
-	console.log("\nE2E summary:", {
-		total: results.length,
-		passed,
-		failed,
-		browsers: selectedBrowsers.map((entry) => entry.id),
-		tests: selectedTests.map((entry) => entry.id),
-	});
+	console.log("\nE2E summary:", summary);
+	if (summary.failedRuns.length > 0) {
+		console.log("Failed runs:");
+		for (const failedRun of summary.failedRuns) {
+			console.log(`- ${formatResultLabel(failedRun)}: ${failedRun.error}`);
+		}
+	}
 
 	return {
-		ok: failed === 0,
+		ok: summary.failed === 0,
 		listed: false,
 		tests: results.length,
-		failures: failed,
+		failures: summary.failed,
+		summary,
 		results,
 	};
 }

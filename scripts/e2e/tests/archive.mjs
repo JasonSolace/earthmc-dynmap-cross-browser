@@ -1,9 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { By, until } from "selenium-webdriver";
-import { assert } from "../lib/shared.mjs";
+import { assert, getE2EMapUrl } from "../lib/shared.mjs";
 
-const MAP_URL = "https://map.earthmc.net/";
+const MAP_URL = getE2EMapUrl({
+	testKey: "E2E_ARCHIVE_MAP_URL",
+	defaultUrl: "https://map.earthmc.net/",
+});
 const ARCHIVE_DATE = "20251103";
 const ARCHIVE_LABEL_DATE = "2025-11-03";
 const PAGE_LOAD_TIMEOUT_MS = 30000;
