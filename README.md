@@ -104,6 +104,8 @@ Available scripts:
 - `npm run extension:chromium`
 - `npm run extension:firefox`
 - `npm run build`
+- `npm run dedupe:borders:nostra`
+- `npm run check:borders:duplicates`
 - `npm run convert:borders:nostra -- <input.geojson> <output.json>`
 
 What they do:
@@ -111,7 +113,46 @@ What they do:
 - `userscript`: builds `dist/emc-dynmapplus.user.js`
 - `extension`: builds both browser targets
 - `build`: builds both the userscript and both extension targets
-- `convert:borders:nostra`: converts lon/lat country GeoJSON into Nostra borders JSON using Miller cylindrical projection
+- `dedupe:borders:nostra`: rebuilds `resources/borders.nostra.json` from raw GeoJSON sources and dedupes shared borders before simplification
+- `check:borders:duplicates`: checks a generated borders file for exact duplicate entries and duplicate undirected edges
+- `convert:borders:nostra`: converts a single lon/lat GeoJSON file into standalone Nostra borders JSON using Miller cylindrical projection
+
+## Borders workflow
+
+The Nostra border source of truth is the raw GeoJSON in `sources/geojson/`.
+
+To rebuild the shipped Nostra borders resource:
+
+```bash
+npm run dedupe:borders:nostra
+```
+
+That command:
+
+- loads every `.geojson` file in `sources/geojson/`
+- applies optional excludes and renames from `sources/geojson/borders.config.json`
+- dedupes shared raw borders before projection and simplification
+- writes the final linework to `resources/borders.nostra.json`
+
+Current raw inputs include:
+
+- `sources/geojson/countries.geojson`
+- `sources/geojson/us-states-and-territories.geojson`
+
+Current config rules include:
+
+- excluding `United States of America` and overlapping US territory entries from the country dataset
+- renaming the US state `Georgia` to `Georgia (US State)` to avoid the country-name collision
+
+To verify the generated file:
+
+```bash
+npm run check:borders:duplicates
+```
+
+This workflow is the fix for the old doubled-border issue seen on borders such as Switzerland. The important rule is: do not manually maintain `resources/borders.nostra.json` as the source of truth. Update the raw GeoJSON inputs and regenerate instead.
+
+If you want to add more subdivision data later, drop another raw `.geojson` file into `sources/geojson/` and rerun the rebuild. Only update `sources/geojson/borders.config.json` when you need dataset-specific overrides such as replacing a parent country outline or resolving a name collision.
 
 ## Automated tests
 
@@ -336,7 +377,11 @@ Important folders and files:
 
 - `src/`: shared extension source code
 - `resources/`: static assets and page-context helpers
+- `sources/geojson/`: raw GeoJSON border sources used to regenerate Nostra borders
+- `sources/geojson/borders.config.json`: exclusions and renames applied during the merged deduped border build
 - `scripts/e2e/`: Selenium test runner, browser launchers, and tests
+- `scripts/build-deduped-borders-geojson.mjs`: raw-source Nostra border builder with shared-edge dedupe
+- `scripts/check-borders-duplicates.mjs`: duplicate checker for generated Nostra border data
 - `build-extension.js`: builds Chromium and Firefox extension packages
 - `build-userscript.js`: builds the userscript output
 - `manifest.json`: shared extension manifest source

@@ -1,9 +1,16 @@
 bun.lockb
 
+# Dependencies
 node_modules/
+
+# Local test/runtime output
 archive-*.log
 .tools/
+.env.e2e
 .env.e2e.local
+web-ext-artifacts/
+
+# Generated extension packages
 dist/emc-dynmapplus.zip
 dist/chromium/
 dist/firefox/

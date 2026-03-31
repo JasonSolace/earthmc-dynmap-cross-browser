@@ -9,6 +9,8 @@
     "extension:firefox": "node build-extension.js firefox",
     "build": "npm run userscript && npm run extension",
     "convert:borders:nostra": "node scripts/convert-borders-geojson.mjs",
+    "dedupe:borders:nostra": "node scripts/build-deduped-borders-geojson.mjs resources/borders.nostra.json",
+    "check:borders:duplicates": "node scripts/check-borders-duplicates.mjs",
     "test:e2e": "node scripts/e2e/run.mjs",
     "test:e2e:all": "npm run test:e2e",
     "test:e2e:firefox": "node scripts/e2e/run.mjs --browser firefox",
