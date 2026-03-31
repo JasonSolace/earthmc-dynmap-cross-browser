@@ -37,10 +37,18 @@ class TokenBucket {
 		this.storageKey = opts.storageKey	// localStorage key
 
 		// load previous bucket state if available
-		const cachedBucket = localStorage[this.storageKey]
-		if (cachedBucket) {
-			/** @type {TokenBucketStored} */
-			const bucketData = JSON.parse(cachedBucket)
+		let bucketData = null
+		try {
+			const cachedBucket = localStorage[this.storageKey]
+			bucketData = cachedBucket ? JSON.parse(cachedBucket) : null
+		} catch (err) {
+			console.warn(`emcdynmapplus: failed to parse token bucket cache "${this.storageKey}", using defaults`, err)
+			try {
+				delete localStorage[this.storageKey]
+			} catch {}
+		}
+
+		if (bucketData && Number.isFinite(bucketData.tokens) && Number.isFinite(bucketData.lastRefill)) {
 			const elapsed = (Date.now() - bucketData.lastRefill) / 1000
 			const added = elapsed * opts.refillRate
 			this.tokens = Math.min(opts.capacity, bucketData.tokens + added)
@@ -102,7 +110,12 @@ async function fetchJSON(url, options = null) {
     const response = await fetch(url, options)
     if (!response.ok && response.status != 304) return null
 
-    return response.json()
+	try {
+		return await response.json()
+	} catch (err) {
+		console.warn('emcdynmapplus: failed to parse JSON response', { url, err })
+		return null
+	}
 }
 
 /**

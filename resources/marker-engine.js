@@ -155,6 +155,24 @@ const pageMarkersDebugInfo = (...args) => {
 	if (pageMarkersDebugEnabled()) console.info(...args);
 };
 
+function parseStoredJson(storageKey, fallbackValue, opts = {}) {
+	try {
+		const rawValue = localStorage[storageKey];
+		if (!rawValue) return fallbackValue;
+
+		return JSON.parse(rawValue);
+	} catch (err) {
+		console.warn(`${MARKER_ENGINE_PREFIX}: failed to parse localStorage key "${storageKey}", using fallback`, err);
+		if (opts.clearInvalid !== false) {
+			try {
+				delete localStorage[storageKey];
+			} catch {}
+		}
+
+		return fallbackValue;
+	}
+}
+
 function getKnownLeafletMaps() {
 	const knownMaps = window[PAGE_MAPS_KEY];
 	return Array.isArray(knownMaps) ? knownMaps : [];
@@ -573,9 +591,12 @@ class TokenBucket {
 		this.refillRate = opts.refillRate;
 		this.storageKey = opts.storageKey;
 
-		const cachedBucket = localStorage[this.storageKey];
-		if (cachedBucket) {
-			const bucketData = JSON.parse(cachedBucket);
+		const bucketData = parseStoredJson(this.storageKey, null);
+		if (
+			bucketData
+			&& Number.isFinite(bucketData.tokens)
+			&& Number.isFinite(bucketData.lastRefill)
+		) {
 			const elapsed = (Date.now() - bucketData.lastRefill) / 1000;
 			const added = elapsed * opts.refillRate;
 			this.tokens = Math.min(opts.capacity, bucketData.tokens + added);
@@ -633,7 +654,12 @@ async function fetchJSON(url, options = null) {
 	const response = await fetch(url, options);
 	if (!response.ok && response.status !== 304) return null;
 
-	return response.json();
+	try {
+		return await response.json();
+	} catch (err) {
+		console.warn(`${MARKER_ENGINE_PREFIX}: failed to parse JSON response`, { url, err });
+		return null;
+	}
 }
 
 const postJSON = (url, body) =>
@@ -668,7 +694,10 @@ async function queryConcurrent(url, arr) {
 
 const currentMapMode = () => localStorage["emcdynmapplus-mapmode"] ?? "meganations";
 const archiveDate = () => parseInt(localStorage["emcdynmapplus-archive-date"]);
-const nationClaimsInfo = () => JSON.parse(localStorage["emcdynmapplus-nation-claims-info"] || "[]");
+const nationClaimsInfo = () => {
+	const parsed = parseStoredJson("emcdynmapplus-nation-claims-info", []);
+	return Array.isArray(parsed) ? parsed : [];
+};
 
 const isNumeric = (str) => Number.isFinite(+str);
 const roundTo16 = (num) => Math.round(num / 16) * 16;
@@ -1520,7 +1549,7 @@ function parseColours(colours) {
 async function getAlliances() {
 	const alliances = await fetchJSON(getCurrentCapiUrl("alliances"));
 	if (!alliances) {
-		const cache = JSON.parse(localStorage["emcdynmapplus-alliances"] || "null");
+		const cache = parseStoredJson("emcdynmapplus-alliances", null);
 		if (cache == null) {
 			showPageAlert("Service responsible for loading alliances will be available later.");
 			return [];

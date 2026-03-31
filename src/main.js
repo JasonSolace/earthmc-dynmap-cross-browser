@@ -107,7 +107,10 @@ const currentMapMode = () => localStorage['emcdynmapplus-mapmode'] ?? 'meganatio
 const archiveDate = () => parseInt(localStorage['emcdynmapplus-archive-date'])
 
 /** @type {() => Array<{color: string | null, input: string | null}>} */
-const nationClaimsInfo = () => JSON.parse(localStorage['emcdynmapplus-nation-claims-info'] || '[]')
+const nationClaimsInfo = () => {
+	const parsed = parseStoredJson('emcdynmapplus-nation-claims-info', [])
+	return Array.isArray(parsed) ? parsed : []
+}
 
 /** @param {MapMode} currentMode */
 function switchMapMode(currentMode) {
@@ -294,6 +297,24 @@ function isMarkersDebugLoggingEnabled() {
 
 const markersDebugInfo = (...args) => {
 	if (isMarkersDebugLoggingEnabled()) console.info(...args)
+}
+
+function parseStoredJson(storageKey, fallbackValue, { clearInvalid = true } = {}) {
+	try {
+		const rawValue = localStorage[storageKey]
+		if (!rawValue) return fallbackValue
+
+		return JSON.parse(rawValue)
+	} catch (err) {
+		console.warn(`${MARKERS_LOG_PREFIX}: failed to parse localStorage key "${storageKey}", using fallback`, err)
+		if (clearInvalid) {
+			try {
+				delete localStorage[storageKey]
+			} catch {}
+		}
+
+		return fallbackValue
+	}
 }
 
 async function getStyledBorders() {
@@ -905,7 +926,7 @@ function parseColours(colours) {
 async function getAlliances() {
 	const alliances = await fetchJSON(getCurrentCapiUrl('alliances'))
 	if (!alliances) {
-		const cache = JSON.parse(localStorage['emcdynmapplus-alliances'])
+		const cache = parseStoredJson('emcdynmapplus-alliances', null)
 		if (cache == null) {
 			showAlert('Service responsible for loading alliances will be available later.')
 			return []
