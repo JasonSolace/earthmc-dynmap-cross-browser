@@ -102,9 +102,16 @@ select {
 }
 
 .leaflet-control {
-	float: inline-end !important;
 	clear: none !important;
 	border-radius: var(--radius-md) !important;
+}
+
+.leaflet-left .leaflet-control {
+	float: left !important;
+}
+
+.leaflet-right .leaflet-control {
+	float: right !important;
 }
 
 .leaflet-control-layers {
@@ -117,9 +124,16 @@ select {
 }
 
 #sidebar {
-	position: relative;
+	position: relative !important;
+	top: auto !important;
+	right: auto !important;
+	bottom: auto !important;
+	left: auto !important;
+	inset: auto !important;
 	z-index: 1001;
-	width: auto;
+	display: inline-block !important;
+	width: auto !important;
+	min-width: 202px;
 	padding: 0;
 	float: left !important;
 	text-align: left;
@@ -128,6 +142,7 @@ select {
 	box-shadow: none;
 	backdrop-filter: none;
 	overflow: visible;
+	box-sizing: border-box;
 }
 
 #sidebar[open] {

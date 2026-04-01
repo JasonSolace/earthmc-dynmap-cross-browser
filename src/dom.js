@@ -469,7 +469,11 @@ function insertServerInfoPanel() {
 function insertSidebarMenu() {
     return waitForElement('.leaflet-top.leaflet-left').then(el => {
         disablePanAndZoom(el)
-        return addMainMenu(el)
+        const sidebar = addMainMenu(el)
+        if (sidebar instanceof Node && el.firstChild !== sidebar) {
+            el.insertBefore(sidebar, el.firstChild)
+        }
+        return sidebar
     })
 }
 
