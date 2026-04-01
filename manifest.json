@@ -1,7 +1,7 @@
 {
 	"manifest_version": 3,
 	"name": "EarthMC Dynmap+ (Cross-Browser Fork)",
-	"version": "2.1.3.1",
+	"version": "2.1.3.2",
 	"author": "3meraldK",
 	"description": "Extension to enrich the EarthMC map experience",
 	"icons": {
@@ -19,9 +19,18 @@
 		{
 			"matches": ["https://map.earthmc.net/*", "https://nostra.earthmc.net/*"],
 			"resources": [
+				"resources/icon-screenshot.png",
+				"resources/icon-show.png",
+				"resources/icon-hide.png",
 				"resources/map-config.js",
 				"resources/borders.aurora.json",
 				"resources/borders.nostra.json",
+				"resources/marker-engine-geometry.js",
+				"resources/marker-engine-httputil.js",
+				"resources/marker-engine-data.js",
+				"resources/marker-engine-transform.js",
+				"resources/marker-engine-page-map.js",
+				"resources/marker-engine-planning.js",
 				"resources/marker-engine.js",
 				"resources/interceptor.js"
 			]
@@ -38,6 +47,11 @@
 				"src/httputil.js",
 				"src/dom.js",
 				"src/screenshot.js",
+				"src/menu-planning-preview.js",
+				"src/menu-planning.js",
+				"src/menu-map-controls.js",
+				"src/menu-options.js",
+				"src/menu-sidebar.js",
 				"src/menu.js",
 				"src/main.js",
 				"src/entrypoint.js"

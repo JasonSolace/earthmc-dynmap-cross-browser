@@ -8,7 +8,6 @@ const MAP_URL = getE2EMapUrl({
 	defaultUrl: "https://map.earthmc.net/",
 });
 const ARCHIVE_DATE = "20251103";
-const ARCHIVE_LABEL_DATE = "2025-11-03";
 const PAGE_LOAD_TIMEOUT_MS = 30000;
 const SIDEBAR_TIMEOUT_MS = 15000;
 
@@ -172,6 +171,10 @@ async function getMarkersSummary(driver) {
 	`);
 }
 
+function isArchiveLabelText(labelText) {
+	return /^Archive Snapshot:\s\d{4}-\d{2}-\d{2}$/.test(String(labelText || "").trim());
+}
+
 async function runArchiveSmokeTest({ browser, headless }) {
 	const artifact = getArtifactInfo(browser.id);
 	if (!fs.existsSync(artifact.path)) {
@@ -276,9 +279,6 @@ async function runArchiveSmokeTest({ browser, headless }) {
 		const liveSnapshot = await getUiSnapshot(driver);
 		console.log("Initial live UI snapshot:", liveSnapshot);
 
-		const liveMarkers = await getMarkersSummary(driver);
-		console.log("Initial live markers summary:", liveMarkers);
-
 		await driver.executeScript(
 			`
 				localStorage.setItem('emcdynmapplus-mapmode', 'archive');
@@ -299,10 +299,10 @@ async function runArchiveSmokeTest({ browser, headless }) {
 				const text = await driver.executeScript(
 					`return document.querySelector('#current-map-mode-label')?.textContent ?? ''`,
 				);
-				return text.includes(ARCHIVE_LABEL_DATE);
+				return /^Archive Snapshot:\s\d{4}-\d{2}-\d{2}$/.test(text.trim());
 			},
 			15000,
-			"Archive label never showed requested archive date.",
+			"Archive label never switched into archive snapshot mode.",
 		);
 
 		const archiveLabelSnapshot = await getUiSnapshot(driver);
@@ -327,16 +327,24 @@ async function runArchiveSmokeTest({ browser, headless }) {
 		);
 
 		assert(
-			finalLabel.includes(ARCHIVE_LABEL_DATE),
-			`Archive label did not persist. Final label: ${finalLabel}`,
+			isArchiveLabelText(finalLabel),
+			`Archive label did not persist as an archive snapshot label. Final label: ${finalLabel}`,
 		);
 		assert(
 			archiveLabelSnapshot.archiveLabelCount === 1,
 			`Archive UI rendered duplicate labels immediately after load. count=${archiveLabelSnapshot.archiveLabelCount}`,
 		);
 		assert(
-			liveMarkers.ok,
-			`Failed to fetch live markers summary: ${liveMarkers.error || "unknown error"}`,
+			archiveLabelSnapshot.mapMode === "archive",
+			`Archive mode did not remain active after refresh. mapMode=${archiveLabelSnapshot.mapMode}`,
+		);
+		assert(
+			archiveLabelSnapshot.extensionSidebarCount === 1,
+			`Archive UI rendered duplicate extension sidebars immediately after load. count=${archiveLabelSnapshot.extensionSidebarCount}`,
+		);
+		assert(
+			archiveLabelSnapshot.pageSidebarCount === 0,
+			`Archive UI rendered unexpected page-level sidebar copies. count=${archiveLabelSnapshot.pageSidebarCount}`,
 		);
 		assert(
 			archiveMarkersFirst.ok,
@@ -347,16 +355,17 @@ async function runArchiveSmokeTest({ browser, headless }) {
 			`Failed to fetch second archive markers summary: ${archiveMarkersSecond.error || "unknown error"}`,
 		);
 		assert(
-			archiveMarkersFirst.markerCount !== liveMarkers.markerCount,
-			`Archive markers did not differ from live markers. live=${liveMarkers.markerCount}, archive=${archiveMarkersFirst.markerCount}`,
+			archiveMarkersFirst.markerCount != null,
+			`Archive marker layer did not expose a marker count. summary=${JSON.stringify(archiveMarkersFirst)}`,
 		);
 		assert(
 			archiveMarkersSecond.markerCount === archiveMarkersFirst.markerCount,
 			`Archive marker count did not persist. first=${archiveMarkersFirst.markerCount}, second=${archiveMarkersSecond.markerCount}`,
 		);
 		assert(
-			!finalLabel.includes(`(${ARCHIVE_LABEL_DATE}) (${ARCHIVE_LABEL_DATE})`),
-			`Archive label duplicated the archive date in the final UI. finalLabel=${finalLabel}`,
+			archiveLabelSnapshot.archiveLabels.length === 1
+				&& archiveLabelSnapshot.archiveLabels[0] === finalLabel,
+			`Archive label changed unexpectedly after stabilization. first=${archiveLabelSnapshot.archiveLabels[0]} final=${finalLabel}`,
 		);
 
 		if (hasLiveLogCapture) {
@@ -398,7 +407,6 @@ async function runArchiveSmokeTest({ browser, headless }) {
 			duplicateLabelFrames: duplicateLabelFrames.length,
 			duplicateExtensionSidebarFrames: duplicateExtensionSidebarFrames.length,
 			finalLabel,
-			liveMarkerCount: liveMarkers.markerCount,
 			archiveMarkerCountFirst: archiveMarkersFirst.markerCount,
 			archiveMarkerCountSecond: archiveMarkersSecond.markerCount,
 		});

@@ -10,11 +10,13 @@ const BROWSERS = new Map(
 );
 
 const TESTS_DIR = fileURLToPath(new URL("./tests", import.meta.url));
+const KNOWN_SUITES = new Set(["smoke", "diagnostic", "all"]);
 
 function parseArgs(argv) {
 	const options = {
 		browser: "all",
 		test: "all",
+		suite: "smoke",
 		list: false,
 		help: false,
 		headless: envFlagEnabled(process.env.npm_config_headless, false)
@@ -32,6 +34,11 @@ function parseArgs(argv) {
 
 		if (arg === "--test") {
 			options.test = argv[++i] ?? "";
+			continue;
+		}
+
+		if (arg === "--suite") {
+			options.suite = argv[++i] ?? "";
 			continue;
 		}
 
@@ -73,6 +80,7 @@ async function loadTests() {
 			throw new Error(`Invalid test module: ${entry}`);
 		}
 
+		test.suite = test.suite === "diagnostic" ? "diagnostic" : "smoke";
 		tests.push(test);
 	}
 
@@ -92,8 +100,17 @@ function selectBrowsers(browserOption) {
 	return [browser];
 }
 
-function selectTests(tests, testOption) {
-	if (testOption === "all") return tests;
+function selectTests(tests, testOption, suiteOption) {
+	if (testOption === "all") {
+		if (!KNOWN_SUITES.has(suiteOption)) {
+			throw new Error(
+				`Unknown suite "${suiteOption}". Expected one of: ${[...KNOWN_SUITES].join(", ")}`,
+			);
+		}
+
+		if (suiteOption === "all") return tests;
+		return tests.filter((candidate) => candidate.suite === suiteOption);
+	}
 
 	const test = tests.find((candidate) => candidate.id === testOption);
 	if (!test) {
@@ -106,15 +123,17 @@ function selectTests(tests, testOption) {
 }
 
 function printHelp() {
-	console.log(`Usage: node scripts/e2e/run.mjs [--browser <id>|all] [--test <id>|all] [--list] [--headless]
+	console.log(`Usage: node tests/e2e/run.mjs [--browser <id>|all] [--suite <smoke|diagnostic|all>] [--test <id>|all] [--list] [--headless]
 
 Examples:
-  node scripts/e2e/run.mjs
-  node scripts/e2e/run.mjs --browser firefox
-  node scripts/e2e/run.mjs --test archive
-  node scripts/e2e/run.mjs --browser chromium --test archive
-  node scripts/e2e/run.mjs --headless
-  node scripts/e2e/run.mjs --list`);
+  node tests/e2e/run.mjs
+  node tests/e2e/run.mjs --suite smoke --browser chromium
+  node tests/e2e/run.mjs --suite diagnostic --browser chromium
+  node tests/e2e/run.mjs --browser firefox
+  node tests/e2e/run.mjs --test archive
+  node tests/e2e/run.mjs --browser chromium --test archive
+  node tests/e2e/run.mjs --headless
+  node tests/e2e/run.mjs --list`);
 }
 
 function printInventory(tests) {
@@ -125,7 +144,7 @@ function printInventory(tests) {
 
 	console.log("Tests:");
 	for (const test of tests) {
-		console.log(`- ${test.id}: ${test.description ?? "No description"}`);
+		console.log(`- ${test.id} [${test.suite}]: ${test.description ?? "No description"}`);
 	}
 }
 
@@ -133,7 +152,7 @@ function formatResultLabel(result) {
 	return `${result.test} on ${result.browser}`;
 }
 
-function summarizeResults(results, selectedBrowsers, selectedTests) {
+function summarizeResults(results, selectedBrowsers, selectedTests, suite) {
 	const passedResults = results.filter((result) => result.status === "passed");
 	const failedResults = results.filter((result) => result.status === "failed");
 
@@ -143,6 +162,7 @@ function summarizeResults(results, selectedBrowsers, selectedTests) {
 		failed: failedResults.length,
 		browsers: selectedBrowsers.map((entry) => entry.id),
 		tests: selectedTests.map((entry) => entry.id),
+		suite,
 		failedTests: [...new Set(failedResults.map((result) => result.test))],
 		failedRuns: failedResults.map((result) => ({
 			test: result.test,
@@ -156,6 +176,7 @@ function summarizeResults(results, selectedBrowsers, selectedTests) {
 export async function runE2E({
 	browser = "all",
 	test = "all",
+	suite = "smoke",
 	list = false,
 	headless = undefined,
 } = {}) {
@@ -167,7 +188,7 @@ export async function runE2E({
 	}
 
 	const selectedBrowsers = selectBrowsers(browser);
-	const selectedTests = selectTests(tests, test);
+	const selectedTests = selectTests(tests, test, suite);
 	const results = [];
 
 	for (const selectedTest of selectedTests) {
@@ -205,7 +226,12 @@ export async function runE2E({
 		}
 	}
 
-	const summary = summarizeResults(results, selectedBrowsers, selectedTests);
+	const summary = summarizeResults(
+		results,
+		selectedBrowsers,
+		selectedTests,
+		test === "all" ? suite : "explicit",
+	);
 
 	console.log("\nE2E summary:", summary);
 	if (summary.failedRuns.length > 0) {

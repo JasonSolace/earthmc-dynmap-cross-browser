@@ -64,11 +64,11 @@ function parseEventDetail(detail) {
 
 function getRequestUrl(input) {
 	try {
-		if (typeof input === "string") return input;
-		if (input instanceof URL) return input.toString();
+		if (typeof input === "string") return resolveUrl(input);
+		if (input instanceof URL) return resolveUrl(input.toString());
 		if (input instanceof Request && typeof input.url === "string")
-			return input.url;
-		if (input && typeof input.url === "string") return input.url;
+			return resolveUrl(input.url);
+		if (input && typeof input.url === "string") return resolveUrl(input.url);
 	} catch {}
 
 	return "";
@@ -77,16 +77,26 @@ function getRequestUrl(input) {
 function getResponseUrl(response, fallback = "") {
 	try {
 		if (typeof response?.url === "string" && response.url.length > 0)
-			return response.url;
+			return resolveUrl(response.url);
 	} catch {}
 
-	return fallback;
+	return resolveUrl(fallback);
+}
+
+function resolveUrl(url) {
+	if (typeof url !== "string" || url.length === 0) return "";
+
+	try {
+		return new URL(url, window.location.href).toString();
+	} catch {
+		return url;
+	}
 }
 
 function parseTileRequestInfo(url) {
 	if (typeof url !== "string" || url.length === 0) return null;
 
-	const match = url.match(/\/tiles\/([^/]+)\/(-?\d+)\/(-?\d+)_(-?\d+)\.(png|jpg|jpeg|webp)(?:[?#].*)?$/i);
+	const match = url.match(/(?:^|\/)tiles\/([^/]+)\/(-?\d+)\/(-?\d+)_(-?\d+)\.(png|jpg|jpeg|webp)(?:[?#].*)?$/i);
 	if (!match) return null;
 
 	const [, world, zoomRaw, tileXRaw, tileYRaw] = match;
@@ -173,9 +183,22 @@ function publishTileRequestState(url, source = "fetch") {
 // Replace the default fetch() with ours to intercept responses
 window.fetch = async (...args) => {
 	const requestUrl = getRequestUrl(args[0]);
+	let response = null;
 
 	try {
-		const response = await originalFetch(...args);
+		response = await originalFetch(...args);
+	} catch (err) {
+		console.error(
+			`${LOG_PREFIX}: original fetch failed during interception`,
+			{
+				url: requestUrl,
+				error: err,
+			},
+		);
+		throw err;
+	}
+
+	try {
 		const responseUrl = getResponseUrl(response, requestUrl);
 		if (!response.ok && response.status != 304) return response;
 		if (responseUrl.includes("web.archive.org")) return response;
@@ -288,14 +311,14 @@ window.fetch = async (...args) => {
 			headers: response.headers,
 		});
 	} catch (err) {
-		console.error(
-			`${LOG_PREFIX}: fetch interception failed, falling back to original fetch`,
+		console.warn(
+			`${LOG_PREFIX}: fetch interception failed after original response succeeded, returning original response`,
 			{
-				url: requestUrl,
+				url: response?.url || requestUrl,
 				error: err,
 			},
 		);
-		return originalFetch(...args);
+		return response;
 	}
 };
 

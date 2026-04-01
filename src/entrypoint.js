@@ -175,11 +175,11 @@ async function init(manifest) {
 	}
 	applyPackagedUiAssetUrls()
 
-    localStorage['emcdynmapplus-mapmode'] ??= 'meganations'
+    localStorage['emcdynmapplus-mapmode'] ??= 'default'
 	localStorage['emcdynmapplus-last-live-mapmode'] ??=
 		localStorage['emcdynmapplus-mapmode'] !== 'archive'
 			? localStorage['emcdynmapplus-mapmode']
-			: 'meganations'
+			: 'default'
 	localStorage['emcdynmapplus-archive-date'] ??= new Date().toISOString().slice(0, 10).replaceAll('-', '')
 	localStorage['emcdynmapplus-normalize-scroll'] ??= 'true'
     localStorage['emcdynmapplus-darkened'] ??= 'true'

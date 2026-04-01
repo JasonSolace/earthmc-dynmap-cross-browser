@@ -2,15 +2,9 @@
 
 This repository is a maintained fork of EarthMC Dynmap+ with first-class support for both Chromium-based browsers and Firefox.
 
-If you are new to browser extension development, the short version is:
+## For Users
 
-1. Install Node.js.
-2. Run `npm install`.
-3. Build the extension with `npm run extension`.
-4. Load the built extension from `dist/chromium/` or `dist/firefox/`.
-5. Optionally run the live browser smoke tests with `npm run test:e2e` after reading `Automated tests` below.
-
-## What this project does
+### What this extension does
 
 This extension adds extra tools and map overlays to the EarthMC Dynmap website, including:
 
@@ -27,7 +21,77 @@ The same shared source code is packaged for:
 - Firefox
 - a userscript fallback
 
-## Before you start
+### Install the extension
+
+If you already have a built release artifact or a local build, load it like this.
+
+### Chromium
+
+1. Open `chrome://extensions`.
+2. Enable `Developer mode`.
+3. Click `Load unpacked`.
+4. Select the extension folder.
+
+For a local build from this repository, that folder is `dist/chromium/`.
+
+### Firefox
+
+Normal users should install the official Firefox release from AMO:
+
+- https://addons.mozilla.org/en-US/firefox/addon/earthmc-dynmap-x-browser/
+
+For a local build from this repository:
+
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Click `Load Temporary Add-on...`.
+3. Select the extension manifest.
+
+That file is `dist/firefox/manifest.json`.
+
+### Common issues
+
+### Firefox add-on disappears after restart
+
+Firefox temporary add-ons are removed when Firefox fully restarts. That is normal during local development and manual testing.
+
+### Archive mode is unavailable or inconsistent
+
+Archive mode depends on historical marker snapshots and a compatibility relay. Normal live map browsing does not depend on that path.
+
+Archive mode currently fetches Wayback snapshots through `https://api.codetabs.com/v1/proxy/?quest=` in practice.
+
+This relay is only used for archive mode. If archive mode is unavailable, the rest of the extension can still work normally.
+
+## License and Attribution
+
+This project is GPL-licensed. See [`LICENSE`](./LICENSE).
+
+This repository is based on the EarthMC Dynmap extension and its forks:
+
+- Original project by 3meraldK:  
+  https://github.com/3meraldK/earthmc-dynmap
+
+- Fork by Owen3H:  
+  https://github.com/Owen3H/earthmc-dynmap
+
+This fork extends the project with:
+
+- cross-browser support
+- automated testing
+- new features and UI improvements
+- bug fixes and reliability work
+
+## For Developers
+
+If you are new to browser extension development, the short version is:
+
+1. Install Node.js.
+2. Run `npm install`.
+3. Build the extension with `npm run extension`.
+4. Load the built extension from `dist/chromium/` or `dist/firefox/`.
+5. Optionally run the live browser smoke tests with `npm run test:e2e` after reading `Automated tests` below.
+
+### Before you start
 
 You need:
 
@@ -39,7 +103,7 @@ If you only want to build the extension, that is enough.
 
 If you also want to run the end-to-end browser tests, read the `Automated tests` section below because Chromium has one important setup rule.
 
-## Quick start
+### Quick start
 
 ### 1. Install dependencies
 
@@ -73,29 +137,7 @@ If you want the userscript:
 npm run userscript
 ```
 
-## Load the extension in your browser
-
-### Chromium
-
-1. Build the Chromium target with `npm run extension:chromium`.
-2. Open `chrome://extensions`.
-3. Enable `Developer mode`.
-4. Click `Load unpacked`.
-5. Select the `dist/chromium` folder.
-
-### Firefox
-
-1. Build the Firefox target with `npm run extension:firefox`.
-2. Open `about:debugging#/runtime/this-firefox`.
-3. Click `Load Temporary Add-on...`.
-4. Select `dist/firefox/manifest.json`.
-
-Note:
-
-- Firefox temporary add-ons are removed when Firefox fully restarts.
-- That is normal during local development.
-
-## Build commands
+### Build commands
 
 Available scripts:
 
@@ -117,59 +159,32 @@ What they do:
 - `check:borders:duplicates`: checks a generated borders file for exact duplicate entries and duplicate undirected edges
 - `convert:borders:nostra`: converts a single lon/lat GeoJSON file into standalone Nostra borders JSON using Miller cylindrical projection
 
-## Borders workflow
+### Automated tests
 
-The Nostra border source of truth is the raw GeoJSON in `sources/geojson/`.
-
-To rebuild the shipped Nostra borders resource:
-
-```bash
-npm run dedupe:borders:nostra
-```
-
-That command:
-
-- loads every `.geojson` file in `sources/geojson/`
-- applies optional excludes and renames from `sources/geojson/borders.config.json`
-- dedupes shared raw borders before projection and simplification
-- writes the final linework to `resources/borders.nostra.json`
-
-Current raw inputs include:
-
-- `sources/geojson/countries.geojson`
-- `sources/geojson/us-states-and-territories.geojson`
-
-Current config rules include:
-
-- excluding `United States of America` and overlapping US territory entries from the country dataset
-- renaming the US state `Georgia` to `Georgia (US State)` to avoid the country-name collision
-
-To verify the generated file:
-
-```bash
-npm run check:borders:duplicates
-```
-
-This workflow is the fix for the old doubled-border issue seen on borders such as Switzerland. The important rule is: do not manually maintain `resources/borders.nostra.json` as the source of truth. Update the raw GeoJSON inputs and regenerate instead.
-
-If you want to add more subdivision data later, drop another raw `.geojson` file into `sources/geojson/` and rerun the rebuild. Only update `sources/geojson/borders.config.json` when you need dataset-specific overrides such as replacing a parent country outline or resolving a name collision.
-
-## Automated tests
-
-The Selenium-based end-to-end tests live in `scripts/e2e/`.
+The Selenium-based end-to-end tests live in `tests/e2e/`.
 
 These are live browser integration and smoke tests, not deterministic unit tests.
 
 They exercise the built extension against real EarthMC pages and external services, so failures can come from browser setup, driver discovery, page changes, archive availability, or network issues in addition to extension regressions.
 
-Main commands:
+Main smoke-test commands:
 
 - `npm run test:e2e`
+- `npm run test:e2e:all`
 - `npm run test:e2e:chromium`
 - `npm run test:e2e:firefox`
 - `npm run test:e2e:archive`
 - `npm run test:e2e:archive:chromium`
 - `npm run test:e2e:archive:firefox`
+
+Current behavior:
+
+- `test:e2e`: Chromium smoke suite only
+- `test:e2e:all`: smoke suite across Chromium and Firefox
+- `test:e2e:diagnostics`: Chromium-only diagnostic/calibration suite
+- `test:e2e:diagnostics:all`: diagnostic suite across Chromium and Firefox
+
+The smoke suite is the one intended to gate normal changes. Diagnostic tests are useful when actively tuning map projection or preview sizing, but they are intentionally not part of the default regression path.
 
 Legacy compatibility aliases still work:
 
@@ -179,9 +194,10 @@ Legacy compatibility aliases still work:
 You can also call the runner directly:
 
 ```bash
-node scripts/e2e/run.mjs --list
-node scripts/e2e/run.mjs --browser chromium
-node scripts/e2e/run.mjs --browser firefox --test archive
+node tests/e2e/run.mjs --list
+node tests/e2e/run.mjs --suite smoke --browser chromium
+node tests/e2e/run.mjs --suite diagnostic --browser chromium
+node tests/e2e/run.mjs --browser firefox --test archive
 ```
 
 ### Headless mode
@@ -197,7 +213,7 @@ npm run test:e2e --headless
 You can also use the direct runner form:
 
 ```bash
-node scripts/e2e/run.mjs --headless
+node tests/e2e/run.mjs --headless
 ```
 
 Important note:
@@ -297,18 +313,19 @@ The runner loads optional local overrides from:
 
 Use `.env.e2e.local` for machine-specific test targets or browser paths that should not be committed. Start from `./.env.e2e.example`.
 
-## What the `archive` e2e test checks
+### What the `archive` e2e test checks
 
 The current automated test opens `https://map.earthmc.net/`, switches the extension into archive mode, refreshes the page, and checks that:
 
 - the archive label appears
 - the archive label stays stable
-- archive marker counts differ from live marker counts
+- archive mode stays active after refresh
+- archive marker payload fetches succeed
 - archive marker counts stay stable over repeated reads
 - the UI does not create duplicate labels
 - the UI does not create duplicate sidebars
 
-## Troubleshooting
+### Troubleshooting
 
 ### The Chromium test says the extension did not load
 
@@ -351,7 +368,44 @@ If they are in custom locations, set:
 - `FIREFOX_BINARY_PATH`
 - `GECKODRIVER_PATH`
 
-## External runtime services
+### Borders workflow
+
+The Nostra border source of truth is the raw GeoJSON in `sources/geojson/`.
+
+To rebuild the shipped Nostra borders resource:
+
+```bash
+npm run dedupe:borders:nostra
+```
+
+That command:
+
+- loads every `.geojson` file in `sources/geojson/`
+- applies optional excludes and renames from `sources/geojson/borders.config.json`
+- dedupes shared raw borders before projection and simplification
+- writes the final linework to `resources/borders.nostra.json`
+
+Current raw inputs include:
+
+- `sources/geojson/countries.geojson`
+- `sources/geojson/us-states-and-territories.geojson`
+
+Current config rules include:
+
+- excluding `United States of America` and overlapping US territory entries from the country dataset
+- renaming the US state `Georgia` to `Georgia (US State)` to avoid the country-name collision
+
+To verify the generated file:
+
+```bash
+npm run check:borders:duplicates
+```
+
+This workflow is the fix for the old doubled-border issue seen on borders such as Switzerland. The important rule is: do not manually maintain `resources/borders.nostra.json` as the source of truth. Update the raw GeoJSON inputs and regenerate instead.
+
+If you want to add more subdivision data later, drop another raw `.geojson` file into `sources/geojson/` and rerun the rebuild. Only update `sources/geojson/borders.config.json` when you need dataset-specific overrides such as replacing a parent country outline or resolving a name collision.
+
+### External runtime services
 
 This project talks to a few services outside the current page origin. That is normal for the current feature set, but it is worth knowing up front:
 
@@ -363,15 +417,7 @@ This project talks to a few services outside the current page origin. That is no
 - `emcstats.bot.nu`: alliance data used by alliance-related map features. Feature-specific dependency.
 - `fonts.googleapis.com` and `fonts.gstatic.com`: UI font delivery for the bundled styles. Best-effort cosmetic dependency.
 
-### Archive mode relay
-
-Archive mode currently fetches Wayback snapshots through `https://api.codetabs.com/v1/proxy/?quest=` in practice.
-
-This relay is only used for archive mode. Normal live map browsing does not depend on it.
-
-It is a third-party dependency and should be treated as a documented compatibility workaround, not a hidden implementation detail. If a reliable first-party or direct-fetch approach becomes practical later, that would be a better cleanup target than changing behavior ad hoc.
-
-## Repository layout
+### Repository layout
 
 Important folders and files:
 
@@ -379,14 +425,15 @@ Important folders and files:
 - `resources/`: static assets and page-context helpers
 - `sources/geojson/`: raw GeoJSON border sources used to regenerate Nostra borders
 - `sources/geojson/borders.config.json`: exclusions and renames applied during the merged deduped border build
-- `scripts/e2e/`: Selenium test runner, browser launchers, and tests
+- `tests/unit/`: unit tests for deterministic shared logic
+- `tests/e2e/`: Selenium test runner, browser launchers, and tests
 - `scripts/build-deduped-borders-geojson.mjs`: raw-source Nostra border builder with shared-edge dedupe
 - `scripts/check-borders-duplicates.mjs`: duplicate checker for generated Nostra border data
 - `build-extension.js`: builds Chromium and Firefox extension packages
 - `build-userscript.js`: builds the userscript output
 - `manifest.json`: shared extension manifest source
 
-## Upstream sync notes
+### Maintainer upstream sync
 
 This fork tries to keep browser-specific behavior isolated so upstream merges stay manageable.
 
@@ -407,7 +454,7 @@ npm run build
 npm run test:e2e
 ```
 
-## Userscript fallback
+### Userscript fallback
 
 The userscript build output is written to:
 
@@ -416,19 +463,3 @@ The userscript build output is written to:
 That build uses this fork's repository metadata rather than the upstream fork metadata.
 
 The tracked userscript file in `dist/` is the published artifact for the current userscript flow, so code changes that affect shipped runtime behavior should be followed by regenerating it.
-
-## Attribution
-
-This repository is based on the EarthMC Dynmap extension and its forks:
-
-- Original project by 3meraldK:  
-  https://github.com/3meraldK/earthmc-dynmap
-
-- Fork by Owen3H:  
-  https://github.com/Owen3H/earthmc-dynmap
-
-This fork (earthmc-dynmap-cross-browser) extends the project with:
-
-- Cross-browser support (Chromium + Firefox)
-- Bug fixes and performance improvements
-- Automated testing and improved reliability

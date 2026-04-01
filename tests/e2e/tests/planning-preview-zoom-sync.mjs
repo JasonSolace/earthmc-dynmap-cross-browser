@@ -13,17 +13,29 @@ const UI_TIMEOUT_MS = 20000;
 const MAP_AUTH_TIMEOUT_MS = 10000;
 const MAP_SETTLE_DELAY_MS = 1200;
 const PLACEMENT_COORDS = { x: 14288, z: -3330 };
-const PROJECTION_ZOOMS = [0, 1, 2, 3];
-const PLANNER_STORAGE_KEY = "emcdynmapplus-planner-nations";
-const PLANNER_ARMED_KEY = "emcdynmapplus-planning-placement-armed";
-const PUBLISHED_TILE_ZOOM_ATTR = "data-emcdynmapplus-tile-zoom";
-const PROJECTION_NATION = {
-	id: "planning-projection-nation",
-	name: "Planning Projection Nation",
+const PREVIEW_RANGE_BLOCKS = 1000;
+const PREVIEW_ZOOM_SEQUENCE_UP = [1, 2, 3, 4, 5];
+const PREVIEW_ZOOM_SEQUENCE_DOWN = [4, 3, 2, 1, 0];
+const PREVIEW_NATION = {
+	id: "planning-preview-zoom-sync-nation",
+	name: "Planning Preview Zoom Sync Nation",
 	color: "#00d084",
 	outlineColor: "#ff00ff",
 	center: PLACEMENT_COORDS,
-	rangeRadiusBlocks: 1000,
+	rangeRadiusBlocks: PREVIEW_RANGE_BLOCKS,
+};
+const PLANNER_STORAGE_KEY = "emcdynmapplus-planner-nations";
+const PLANNER_ARMED_KEY = "emcdynmapplus-planning-placement-armed";
+const PUBLISHED_TILE_ZOOM_ATTR = "data-emcdynmapplus-tile-zoom";
+const DIAMETER_TOLERANCE_PX = 12;
+const CHANGE_THRESHOLD_PX = 60;
+const EXPECTED_CURSOR_DIAMETER_BY_ZOOM = {
+	0: 258,
+	1: 508,
+	2: 1007,
+	3: 2010,
+	4: 4016,
+	5: 8028,
 };
 
 function getArtifactInfo(browserId) {
@@ -43,7 +55,7 @@ function getArtifactInfo(browserId) {
 		};
 	}
 
-	throw new Error(`Unsupported browser for planning projection test: ${browserId}`);
+	throw new Error(`Unsupported browser for planning preview zoom sync test: ${browserId}`);
 }
 
 function buildMapUrl(baseUrl, { x, z }, zoom = 1) {
@@ -168,34 +180,16 @@ async function switchToPlanningMode(driver) {
 	);
 }
 
-async function ensurePlanningModeUi(driver) {
-	const hasPlanningUi = await driver.executeScript(`
-		return localStorage.getItem("emcdynmapplus-mapmode") === "planning"
-			&& !!document.querySelector("#planning-place-button");
-	`);
-	if (hasPlanningUi) return;
-	await switchToPlanningMode(driver);
-}
-
-async function seedProjectionNation(driver) {
+async function seedPreviewNation(driver) {
 	await driver.executeScript(
 		`
 			localStorage.setItem(arguments[0], JSON.stringify([arguments[1]]));
 			localStorage.setItem(arguments[2], "false");
 		`,
 		PLANNER_STORAGE_KEY,
-		PROJECTION_NATION,
+		PREVIEW_NATION,
 		PLANNER_ARMED_KEY,
 	);
-}
-
-async function navigateToProjectionZoom(driver, requestedZoom) {
-	const targetUrl = buildMapUrl(BASE_MAP_URL, PLACEMENT_COORDS, requestedZoom);
-	await driver.get(targetUrl);
-	await waitForMapInteractive(driver, `navigate-zoom-${requestedZoom}`);
-	await ensurePlanningModeUi(driver);
-	await ensureSidebarOpen(driver);
-	return targetUrl;
 }
 
 async function armPreview(driver) {
@@ -234,23 +228,10 @@ async function moveCursorToMapCenter(driver) {
 	`);
 }
 
-async function waitForPagePlanningHelper(driver) {
-	await driver.wait(
-		async () =>
-			driver.executeScript(`
-				return !!window.EMCDYNMAPPLUS_PAGE_PLANNING_DEBUG
-					&& typeof window.EMCDYNMAPPLUS_PAGE_PLANNING_DEBUG.getProjectionSignals === "function";
-			`),
-		UI_TIMEOUT_MS,
-		"Planning page debug helper never became available.",
-	);
-}
-
-async function collectProjectionSnapshot(driver) {
+async function collectSnapshot(driver) {
 	return driver.executeScript(`
 		const helper = window.EMCDYNMAPPLUS_PAGE_PLANNING_DEBUG;
 		return {
-			projectionSignals: helper?.getProjectionSignals?.() ?? null,
 			cursorPreview: helper?.getCursorPreviewMetrics?.() ?? null,
 			renderedNation: helper?.measureRenderedNation?.({
 				outlineColor: arguments[0],
@@ -258,10 +239,35 @@ async function collectProjectionSnapshot(driver) {
 				minAlpha: 64,
 			}) ?? null,
 		};
-	`, PROJECTION_NATION.outlineColor);
+	`, PREVIEW_NATION.outlineColor);
 }
 
-async function runPlanningProjectionTest({ browser, headless }) {
+async function waitForPreviewDiameterChange(driver, previousDiameter) {
+	await driver.wait(
+		async () => {
+			const snapshot = await collectSnapshot(driver);
+			const nextDiameter = snapshot?.cursorPreview?.ringBounds?.width ?? null;
+			return Number.isFinite(nextDiameter)
+				&& Math.abs(nextDiameter - previousDiameter) >= CHANGE_THRESHOLD_PX;
+		},
+		UI_TIMEOUT_MS,
+		`Preview diameter did not change by at least ${CHANGE_THRESHOLD_PX}px.`,
+	);
+}
+
+async function clickZoomControl(driver, selector, description) {
+	await clickExtensionControl(driver, selector, description);
+	await driver.sleep(MAP_SETTLE_DELAY_MS);
+}
+
+function assertClose(actual, expected, tolerance, label) {
+	assert(Number.isFinite(actual), `${label} was not numeric. actual=${actual}`);
+	const delta = Math.abs(actual - expected);
+	assert(delta <= tolerance, `${label} was outside tolerance. actual=${actual}, expected=${expected}, tolerance=${tolerance}, delta=${delta}`);
+	return delta;
+}
+
+async function runPlanningPreviewZoomSyncTest({ browser, headless }) {
 	const artifact = getArtifactInfo(browser.id);
 	if (!fs.existsSync(artifact.path)) {
 		throw new Error(
@@ -280,12 +286,12 @@ async function runPlanningProjectionTest({ browser, headless }) {
 			script: PAGE_LOAD_TIMEOUT_MS,
 		});
 
-		const startUrl = buildMapUrl(BASE_MAP_URL, PLACEMENT_COORDS, 1);
-		console.log("Starting planning projection test:", {
+		const startUrl = buildMapUrl(BASE_MAP_URL, PLACEMENT_COORDS, 0);
+		console.log("Starting planning preview zoom sync test:", {
 			browser: browser.label,
 			url: startUrl,
 			headless: headless ?? null,
-			zooms: PROJECTION_ZOOMS,
+			rangeBlocks: PREVIEW_RANGE_BLOCKS,
 		});
 
 		await driver.get(startUrl);
@@ -294,41 +300,92 @@ async function runPlanningProjectionTest({ browser, headless }) {
 		await driver.navigate().refresh();
 		await waitForMapInteractive(driver, "after-clear-refresh");
 		await switchToPlanningMode(driver);
-		await seedProjectionNation(driver);
+		await seedPreviewNation(driver);
 		await driver.navigate().refresh();
 		await waitForMapInteractive(driver, "after-seed-refresh");
-		await waitForPagePlanningHelper(driver);
+		await armPreview(driver);
 
-		const results = [];
-		for (const zoom of PROJECTION_ZOOMS) {
-			const targetUrl = await navigateToProjectionZoom(driver, zoom);
-			await waitForPagePlanningHelper(driver);
-			await armPreview(driver);
-			const moveResult = await moveCursorToMapCenter(driver);
-			assert(moveResult?.ok, `Could not move cursor over map. details=${JSON.stringify(moveResult)}`);
-			await driver.sleep(250);
+		const moveResult = await moveCursorToMapCenter(driver);
+		assert(moveResult?.ok, `Could not move cursor over map. details=${JSON.stringify(moveResult)}`);
+		await driver.sleep(250);
 
-			const snapshot = await collectProjectionSnapshot(driver);
-			const result = {
-				requestedZoom: zoom,
-				targetUrl,
-				projectionSignals: snapshot.projectionSignals,
-				renderedDiameterPx: snapshot.renderedNation?.renderedDiameterPx ?? null,
-				blocksPerPixel: snapshot.renderedNation?.blocksPerPixel ?? null,
-				cursorPreviewDiameterPx: snapshot.cursorPreview?.ringBounds?.width ?? null,
-				cursorPreviewCenterPx: snapshot.cursorPreview?.centerBounds?.width ?? null,
-				recentTileZoomCounts: snapshot.projectionSignals?.tileSummary?.zoomCounts ?? null,
-				recentTileSampleCount: snapshot.projectionSignals?.tileSummary?.sampleCount ?? null,
-			};
-			results.push(result);
-			console.log(`Planning projection zoom ${zoom}:`, result);
+		const zoom0 = await collectSnapshot(driver);
+		const initialPreviewDiameterPx = zoom0.cursorPreview?.ringBounds?.width ?? null;
+		assertClose(
+			initialPreviewDiameterPx,
+			EXPECTED_CURSOR_DIAMETER_BY_ZOOM[0],
+			DIAMETER_TOLERANCE_PX,
+			"Initial zoom0 preview diameter",
+		);
+		assert(
+			zoom0.cursorPreview?.zoomLevel === 0,
+			`Initial preview zoom level was incorrect. actual=${zoom0.cursorPreview?.zoomLevel}, expected=0`,
+		);
+
+		const upwardResults = [];
+		let previousPreviewDiameterPx = initialPreviewDiameterPx;
+		for (const zoom of PREVIEW_ZOOM_SEQUENCE_UP) {
+			await clickZoomControl(driver, ".leaflet-control-zoom-in", `zoom in control to ${zoom}`);
+			await waitForPreviewDiameterChange(driver, previousPreviewDiameterPx);
+			const snapshot = await collectSnapshot(driver);
+			const cursorPreviewDiameterPx = snapshot.cursorPreview?.ringBounds?.width ?? null;
+			const deltaFromExpected = assertClose(
+				cursorPreviewDiameterPx,
+				EXPECTED_CURSOR_DIAMETER_BY_ZOOM[zoom],
+				DIAMETER_TOLERANCE_PX,
+				`Zoom${zoom} preview diameter after zoom without mousemove`,
+			);
+			assert(
+				snapshot.cursorPreview?.zoomLevel === zoom,
+				`Preview zoom level after zoom-in was incorrect. actual=${snapshot.cursorPreview?.zoomLevel}, expected=${zoom}`,
+			);
+			upwardResults.push({
+				zoom,
+				cursorPreviewDiameterPx,
+				deltaFromExpected,
+				zoomLevel: snapshot.cursorPreview?.zoomLevel ?? null,
+				zoomSource: snapshot.cursorPreview?.zoomSource ?? null,
+			});
+			previousPreviewDiameterPx = cursorPreviewDiameterPx;
 		}
 
-		console.log("Planning projection summary:", results);
-		assert(results.length > 0, "Planning projection test did not collect any results.");
-		for (const result of results) {
-			assert(result.projectionSignals != null, `Projection signals were missing for requested zoom ${result.requestedZoom}.`);
+		const downwardResults = [];
+		for (const zoom of PREVIEW_ZOOM_SEQUENCE_DOWN) {
+			await clickZoomControl(driver, ".leaflet-control-zoom-out", `zoom out control to ${zoom}`);
+			await waitForPreviewDiameterChange(driver, previousPreviewDiameterPx);
+			const snapshot = await collectSnapshot(driver);
+			const cursorPreviewDiameterPx = snapshot.cursorPreview?.ringBounds?.width ?? null;
+			const deltaFromExpected = assertClose(
+				cursorPreviewDiameterPx,
+				EXPECTED_CURSOR_DIAMETER_BY_ZOOM[zoom],
+				DIAMETER_TOLERANCE_PX,
+				`Zoom${zoom} preview diameter after zoom without mousemove`,
+			);
+			assert(
+				snapshot.cursorPreview?.zoomLevel === zoom,
+				`Preview zoom level after zoom-out was incorrect. actual=${snapshot.cursorPreview?.zoomLevel}, expected=${zoom}`,
+			);
+			downwardResults.push({
+				zoom,
+				cursorPreviewDiameterPx,
+				deltaFromExpected,
+				zoomLevel: snapshot.cursorPreview?.zoomLevel ?? null,
+				zoomSource: snapshot.cursorPreview?.zoomSource ?? null,
+			});
+			previousPreviewDiameterPx = cursorPreviewDiameterPx;
 		}
+
+		const summary = {
+			initial: {
+				zoom: 0,
+				cursorPreviewDiameterPx: initialPreviewDiameterPx,
+				zoomLevel: zoom0.cursorPreview?.zoomLevel ?? null,
+				zoomSource: zoom0.cursorPreview?.zoomSource ?? null,
+			},
+			upwardResults,
+			downwardResults,
+		};
+		console.log("Planning preview zoom sync summary:", summary);
 	} finally {
 		try {
 			await clearPlanningState(driver);
@@ -338,7 +395,8 @@ async function runPlanningProjectionTest({ browser, headless }) {
 }
 
 export default {
-	id: "planning-projection",
-	description: "Capture planning zoom/projection signals and preview metrics by requested zoom",
-	run: runPlanningProjectionTest,
+	id: "planning-preview-zoom-sync",
+	suite: "diagnostic",
+	description: "Assert armed cursor preview resizes after on-page zoom without extra mouse movement",
+	run: runPlanningPreviewZoomSyncTest,
 };

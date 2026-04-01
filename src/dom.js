@@ -478,7 +478,7 @@ function insertLayerOptionsMenu() {
 	return waitForElement('.leaflet-control-layers-list').then(el => {
 		const control = el.closest('.leaflet-control-layers')
 		if (control instanceof HTMLElement) disablePanAndZoom(control)
-		const mapMode = localStorage['emcdynmapplus-mapmode'] ?? 'meganations'
+		const mapMode = localStorage['emcdynmapplus-mapmode'] ?? 'default'
 		return addOptions(el, mapMode)
 	})
 }
