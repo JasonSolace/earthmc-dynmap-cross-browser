@@ -342,6 +342,74 @@ test("marker engine keeps Aurora on country borders only", async () => {
 	assert.equal(result.find((layer) => layer.id === "stateBorders"), undefined);
 });
 
+test("marker engine loads gzipped packaged border resources", async () => {
+	const { exports } = loadMarkerEngine({
+		extraGlobals: {
+			EMCDYNMAPPLUS_MAP: {
+				getBorderResourcePaths: () => ({
+					country: "resources/borders.nostra.states-and-countries.json.gz",
+				}),
+				getBorderResourcePath: () => "resources/borders.nostra.states-and-countries.json.gz",
+				getCurrentMapType: () => "nostra",
+				getChunkBounds: () => ({
+					L: -32,
+					R: 32,
+					U: -32,
+					D: 32,
+				}),
+				shouldInjectDynmapPlusChunksLayer: () => false,
+				getMapApiUrl: (baseUrl, resourcePath = "") =>
+					`${String(baseUrl).replace(/\/+$/, "")}/nostra${
+						resourcePath ? `/${String(resourcePath).replace(/^\/+/, "")}` : ""
+					}`,
+				getArchiveMarkersSourceUrl: () =>
+					"https://map.earthmc.net/tiles/minecraft_overworld/markers.json",
+				getNationClaimBonus: (numNationResidents) =>
+					numNationResidents >= 20 ? 10 : 0,
+			},
+			__EMCDYNMAPPLUS_DECOMPRESS_GZIP__: async () =>
+				JSON.stringify({
+					gz_country_line: {
+						x: [0, 16],
+						z: [0, 16],
+					},
+				}),
+		},
+		fetchImpl: async () => ({
+			ok: true,
+			status: 200,
+			async arrayBuffer() {
+				return new Uint8Array([0x1f, 0x8b, 0x08]).buffer;
+			},
+		}),
+	});
+
+	const result = await exports.modifyMarkersInPage([
+		{
+			id: "towny",
+			name: "Towns",
+			markers: [
+				{
+					type: "polygon",
+					tooltip:
+						'<div><span style="font-size:120%;"><b>Test Town</b></span> (Nationless)\n    <i>/town set board [msg]</i></div>',
+					popup:
+						'<div><span style="font-size:120%;"><b>Test Town</b></span><br>\nMayor: <b>MayorOne</b>\n\t<br>\nCouncillors: <b>None</b>\n\t<br>\n<details><summary>Residents</summary>\n    \tMayorOne\n   \t</details>\n   \t<br>\n<i>/town set board [msg]</i> \n    <br>\nFlags: <b>true</b> <b>false</b></div>',
+					points: [[[
+						{ x: 0, z: 0 },
+						{ x: 16, z: 0 },
+						{ x: 16, z: 16 },
+						{ x: 0, z: 16 },
+					]]],
+				},
+			],
+		},
+	]);
+
+	assert.ok(result.find((layer) => layer.id === "countryBorders"));
+	assert.equal(result.find((layer) => layer.id === "countryBorders").markers.length, 1);
+});
+
 test("marker engine rewrites squaremap town descriptions and alliance labels", () => {
 	const { exports, context } = loadMarkerEngine();
 	evaluate(

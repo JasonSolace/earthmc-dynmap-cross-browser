@@ -10,10 +10,13 @@ import {
 } from 'fs'
 import * as path from 'path'
 import archiver from 'archiver'
+import { gzipSync } from 'zlib'
 
 const EXT_NAME = 'emc-dynmapplus'
 const DIST_DIR = 'dist'
 const ROOT_MANIFEST = JSON.parse(readFileSync('manifest.json', 'utf8'))
+const FIREFOX_JSON_PARSE_LIMIT_BYTES = 5 * 1024 * 1024
+const FIREFOX_COMPRESSIBLE_BORDER_RESOURCE = /^borders\..+\.json$/
 const requestedTarget = process.argv[2]
 const targets =
 	requestedTarget === 'chromium' || requestedTarget === 'firefox'
@@ -74,6 +77,46 @@ function getTargetManifest(target) {
 	return manifest
 }
 
+function rewriteTextFile(filePath, replacements) {
+	let content = readFileSync(filePath, 'utf8')
+	for (const [before, after] of replacements) {
+		content = content.split(before).join(after)
+	}
+	writeFileSync(filePath, content)
+}
+
+function applyFirefoxLargeResourcePackaging(outdir) {
+	const resourcesDir = path.join(outdir, 'resources')
+	const renames = []
+
+	for (const file of readdirSync(resourcesDir)) {
+		if (!FIREFOX_COMPRESSIBLE_BORDER_RESOURCE.test(file)) continue
+
+		const fullPath = path.join(resourcesDir, file)
+		const size = statSync(fullPath).size
+		if (size <= FIREFOX_JSON_PARSE_LIMIT_BYTES) continue
+
+		const compressedPath = `${fullPath}.gz`
+		writeFileSync(compressedPath, gzipSync(readFileSync(fullPath), { level: 9 }))
+		rmSync(fullPath)
+		renames.push([`resources/${file}`, `resources/${file}.gz`])
+	}
+
+	if (!renames.length) return
+
+	rewriteTextFile(path.join(outdir, 'resources', 'map-config.js'), renames)
+
+	const manifestPath = path.join(outdir, 'manifest.json')
+	const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+	manifest.web_accessible_resources = manifest.web_accessible_resources.map(entry => ({
+		...entry,
+		resources: entry.resources.map(resource =>
+			renames.find(([before]) => before === resource)?.[1] ?? resource
+		),
+	}))
+	writeFileSync(manifestPath, JSON.stringify(manifest, null, '\t') + '\n')
+}
+
 function stageTargetDir(target) {
 	const outdir = path.join(DIST_DIR, target)
 	rmSync(outdir, { recursive: true, force: true })
@@ -86,6 +129,7 @@ function stageTargetDir(target) {
 		path.join(outdir, 'manifest.json'),
 		JSON.stringify(getTargetManifest(target), null, '\t') + '\n'
 	)
+	if (target === 'firefox') applyFirefoxLargeResourcePackaging(outdir)
 
 	return outdir
 }

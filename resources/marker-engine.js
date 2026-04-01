@@ -413,13 +413,35 @@ async function getStyledBorders(resourcePath) {
 
 	if (!pendingBordersLoads.has(resourcePath)) {
 		const borderFilename = resourcePath.split("/").pop() || "borders.aurora.json";
+		const loadBordersFromResponse = async (response) => {
+			if (!resourcePath.endsWith(".gz")) return response.json();
+
+			const compressed = await response.arrayBuffer();
+			const testDecompressor = globalThis.__EMCDYNMAPPLUS_DECOMPRESS_GZIP__;
+			if (typeof testDecompressor === "function") {
+				return JSON.parse(await testDecompressor(compressed));
+			}
+
+			if (typeof DecompressionStream !== "function") {
+				throw new Error("This browser cannot read packaged gzip border resources.");
+			}
+
+			const compressedBody = new Response(compressed).body;
+			if (!compressedBody) {
+				throw new Error("Could not read the packaged gzip border resource body.");
+			}
+
+			const decompressed = compressedBody.pipeThrough(new DecompressionStream("gzip"));
+			return JSON.parse(await new Response(decompressed).text());
+		};
+
 		pendingBordersLoads.set(
 			resourcePath,
 			fetch(getResourceUrl(borderFilename))
 				.then(async (response) => {
 					if (!response.ok) return null;
 
-					const borders = await response.json();
+					const borders = await loadBordersFromResponse(response);
 					return Object.fromEntries(
 						Object.entries(borders).map(([key, border]) => [key, { ...border, ...EXTRA_BORDER_OPTS }]),
 					);
