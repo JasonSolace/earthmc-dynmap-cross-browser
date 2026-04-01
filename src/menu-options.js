@@ -6,6 +6,19 @@
 
 	const DYNMAP_PLUS_LAYER_OWNER = "dynmapplus";
 	const DYNMAP_PLUS_LAYER_SECTION = "dynmapplus";
+	const EXCLUSIVE_DYNMAP_PLUS_LAYER_IDS = Object.freeze({
+		countryBorders: "stateBorders",
+		stateBorders: "countryBorders",
+	});
+
+	function resolveLinkedDynmapPlusLayerToggleChanges(layerId, nextChecked) {
+		const changes = new Map([[layerId, nextChecked]]);
+		if (!nextChecked) return changes;
+
+		const linkedLayerId = EXCLUSIVE_DYNMAP_PLUS_LAYER_IDS[layerId];
+		if (linkedLayerId) changes.set(linkedLayerId, false);
+		return changes;
+	}
 
 	function createMenuOptions({
 		createElement,
@@ -122,6 +135,8 @@
 			for (const label of layerLabels) {
 				optionsMenu.insertBefore(label, insertBefore);
 			}
+
+			syncLinkedDynmapPlusLayerBindings(layerLabels);
 		}
 
 		function observeDynmapPlusLayerOptions(layersList, optionsMenu) {
@@ -149,6 +164,48 @@
 				label.dataset.emcdynmapplusLayerOwner === DYNMAP_PLUS_LAYER_OWNER &&
 				label.dataset.emcdynmapplusLayerSection === DYNMAP_PLUS_LAYER_SECTION
 			);
+		}
+
+		function syncLinkedDynmapPlusLayerBindings(layerLabels) {
+			const inputsByLayerId = new Map();
+
+			for (const label of layerLabels) {
+				const input = label.querySelector("input.leaflet-control-layers-selector");
+				const layerId =
+					input?.dataset?.emcdynmapplusLayerId ||
+					label?.dataset?.emcdynmapplusLayerId ||
+					"";
+				if (!(input instanceof HTMLElement) || !layerId) continue;
+				inputsByLayerId.set(layerId, input);
+			}
+
+			for (const [layerId, input] of inputsByLayerId.entries()) {
+				if (!EXCLUSIVE_DYNMAP_PLUS_LAYER_IDS[layerId]) continue;
+				if (input.dataset.emcdynmapplusLayerLinkedBound === "true") continue;
+
+				input.dataset.emcdynmapplusLayerLinkedBound = "true";
+				input.addEventListener("change", () => {
+					const changes = resolveLinkedDynmapPlusLayerToggleChanges(
+						layerId,
+						input.checked,
+					);
+					for (const [targetLayerId, nextChecked] of changes.entries()) {
+						if (targetLayerId === layerId) continue;
+						applyDynmapPlusLayerToggleState(
+							inputsByLayerId.get(targetLayerId),
+							nextChecked,
+						);
+					}
+				});
+			}
+		}
+
+		function applyDynmapPlusLayerToggleState(input, nextChecked) {
+			if (!(input instanceof HTMLElement)) return;
+			if (input.checked === nextChecked) return;
+
+			if (typeof input.click === "function") input.click();
+			if (input.checked !== nextChecked) input.checked = nextChecked;
 		}
 
 		function addCheckboxOption(
@@ -406,6 +463,7 @@
 
 		return {
 			addOptions,
+			resolveLinkedDynmapPlusLayerToggleChanges,
 			syncDynmapPlusLayerOptions,
 			observeDynmapPlusLayerOptions,
 			isDynmapPlusLeafletLayerLabel,

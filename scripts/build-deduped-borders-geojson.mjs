@@ -1,18 +1,12 @@
-import { readdirSync, readFileSync, writeFileSync } from 'fs'
+import { readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { DEFAULTS, NAME_KEYS, validateProjectionOptions } from './borders-geojson-shared.mjs'
-const DEFAULT_INPUT_DIR = 'sources/geojson'
-const DEFAULT_CONFIG_PATH = path.join(DEFAULT_INPUT_DIR, 'borders.config.json')
 
 const usage = `Usage:
   node scripts/build-deduped-borders-geojson.mjs <output.json> [options]
 
 Options:
-  --input <file.geojson>      Add one explicit input file
-  --input-dir <dir>           Load every .geojson file in a directory (default: ${DEFAULT_INPUT_DIR})
-  --config <file.json>        Load excludes and renames from a config file (default: ${DEFAULT_CONFIG_PATH} when present)
-  --exclude-name <name>      Skip a feature by its resolved name
-  --rename <from=to>         Rename a feature after loading
+  --input <file.geojson>      Add one explicit input file (repeatable, required)
   --simplify <blocks>        Douglas-Peucker tolerance in world blocks (default: ${DEFAULTS.simplifyTolerance})
   --decimals <n>             Decimal places in output (default: ${DEFAULTS.decimals})
   --x-min <n>                World minimum X (default: ${DEFAULTS.xMin})
@@ -39,10 +33,6 @@ function parseArgs(argv) {
 	const opts = {
 		...DEFAULTS,
 		inputs: [],
-		inputDir: DEFAULT_INPUT_DIR,
-		configPath: DEFAULT_CONFIG_PATH,
-		excludedNames: new Set(),
-		renames: new Map(),
 	}
 
 	const positional = []
@@ -61,21 +51,6 @@ function parseArgs(argv) {
 			case 'input':
 				opts.inputs.push(value)
 				break
-			case 'input-dir':
-				opts.inputDir = value
-				break
-			case 'config':
-				opts.configPath = value
-				break
-			case 'exclude-name':
-				opts.excludedNames.add(value)
-				break
-			case 'rename': {
-				const index = value.indexOf('=')
-				if (index <= 0 || index === value.length - 1) fail(`Invalid --rename value "${value}". Use from=to`)
-				opts.renames.set(value.slice(0, index), value.slice(index + 1))
-				break
-			}
 			case 'simplify':
 				opts.simplifyTolerance = Number(value)
 				break
@@ -113,9 +88,10 @@ function parseArgs(argv) {
 
 	if (positional.length !== 1) fail(usage)
 	opts.outputPath = positional[0]
+	if (opts.inputs.length === 0) fail(`At least one --input value is required.\n\n${usage}`)
 
 	try {
-		validateProjectionOptions(opts, ['inputs', 'inputDir', 'configPath', 'excludedNames', 'renames', 'outputPath'])
+		validateProjectionOptions(opts, ['inputs', 'outputPath'])
 	} catch (error) {
 		fail(error.message)
 	}
@@ -320,10 +296,8 @@ function buildUniqueRawEdges(features, options) {
 	let sourceEdgeCount = 0
 
 	for (const feature of features) {
-		let name = findFeatureName(feature?.properties)
+		const name = findFeatureName(feature?.properties)
 		if (!name) continue
-		if (options.excludedNames.has(name)) continue
-		if (options.renames.has(name)) name = options.renames.get(name)
 
 		const polygons = toPolygons(feature?.geometry)
 		for (const polygon of polygons) {
@@ -437,64 +411,22 @@ function canonicalizeProjectedLine(points, decimals) {
 	return forward.localeCompare(reversed) <= 0 ? forward : reversed
 }
 
-function loadConfigFile(configPath) {
-	try {
-		const raw = readFileSync(configPath, 'utf8')
-		const config = JSON.parse(raw)
-		if (config == null || typeof config !== 'object' || Array.isArray(config)) fail(`Config must be a JSON object: ${configPath}`)
-		return config
-	} catch (error) {
-		if (error.code === 'ENOENT') return null
-		fail(`Failed to read config ${configPath}: ${error.message}`)
-	}
-}
-
-function applyConfigFile(options) {
-	const config = loadConfigFile(options.configPath)
-	if (!config) return { loaded: false, configPath: options.configPath }
-
-	if (config.excludeNames != null) {
-		if (!Array.isArray(config.excludeNames)) fail(`Config field "excludeNames" must be an array: ${options.configPath}`)
-		for (const name of config.excludeNames) {
-			if (typeof name !== 'string' || name.trim() === '') fail(`Config field "excludeNames" must only contain non-empty strings: ${options.configPath}`)
-			options.excludedNames.add(name)
-		}
-	}
-
-	if (config.renames != null) {
-		if (config.renames == null || typeof config.renames !== 'object' || Array.isArray(config.renames)) fail(`Config field "renames" must be an object: ${options.configPath}`)
-		for (const [from, to] of Object.entries(config.renames)) {
-			if (typeof to !== 'string' || to.trim() === '') fail(`Config field "renames" must map to non-empty strings: ${options.configPath}`)
-			options.renames.set(from, to)
-		}
-	}
-
-	return { loaded: true, configPath: options.configPath }
-}
-
 function resolveInputPaths(options) {
-	const explicitInputs = [...options.inputs]
-	const discoveredInputs = readdirSync(options.inputDir, { withFileTypes: true })
-		.filter(entry => entry.isFile() && entry.name.toLowerCase().endsWith('.geojson'))
-		.map(entry => path.join(options.inputDir, entry.name))
-		.sort((a, b) => a.localeCompare(b))
-
 	const seen = new Set()
 	const inputs = []
-	for (const inputPath of [...explicitInputs, ...discoveredInputs]) {
+	for (const inputPath of options.inputs) {
 		const normalized = path.normalize(inputPath)
 		if (seen.has(normalized)) continue
 		seen.add(normalized)
 		inputs.push(inputPath)
 	}
 
-	if (inputs.length === 0) fail(`No input GeoJSON files found. Checked ${path.resolve(options.inputDir)} and any explicit --input values.`)
+	if (inputs.length === 0) fail(`No input GeoJSON files found for explicit --input values.`)
 	return inputs
 }
 
 function main() {
 	const options = parseArgs(process.argv.slice(2))
-	const configStatus = applyConfigFile(options)
 	const inputPaths = resolveInputPaths(options)
 	const allFeatures = []
 
@@ -549,8 +481,6 @@ function main() {
 	writeFileSync(options.outputPath, JSON.stringify(ordered, null, 2) + '\n')
 
 	console.log(`Loaded ${allFeatures.length} source features from ${inputPaths.length} GeoJSON files.`)
-	console.log(`Input directory: ${path.resolve(options.inputDir)}`)
-	console.log(`Config file: ${configStatus.loaded ? path.resolve(configStatus.configPath) : 'none'}`)
 	console.log(`Unique raw edges: ${uniqueEdges.size}`)
 	console.log(`Collapsed duplicate raw edge occurrences: ${collapsedDuplicateEdgeOccurrences}`)
 	console.log(`Skipped exact duplicate generated lines: ${skippedExactDuplicateLines}`)

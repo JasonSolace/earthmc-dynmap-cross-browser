@@ -42,7 +42,9 @@
 				hosts: Object.freeze([
 					'map.earthmc.net',
 				]),
-				borderResource: 'resources/borders.aurora.json',
+				borderResources: Object.freeze({
+					country: 'resources/borders.aurora.json',
+				}),
 				injectDynmapPlusChunksLayer: true,
 				chunkBounds: Object.freeze({
 					L: -33280,
@@ -57,7 +59,10 @@
 				hosts: Object.freeze([
 					'nostra.earthmc.net',
 				]),
-				borderResource: 'resources/borders.nostra.json',
+				borderResources: Object.freeze({
+					country: 'resources/borders.nostra.countries.json',
+					state: 'resources/borders.nostra.states-and-countries.json',
+				}),
 				injectDynmapPlusChunksLayer: false,
 				chunkBounds: Object.freeze({
 					L: -64512,
@@ -86,8 +91,13 @@
 	const getCurrentMapType = (hostname = globalThis.location?.hostname ?? '') =>
 		detectMapTypeFromHostname(hostname) ?? MAP_RUNTIME_CONFIG.defaultMapType
 
-	const getBorderResourcePath = (mapType = getCurrentMapType()) =>
-		getMapConfig(mapType).borderResource
+	const getBorderResourcePaths = (mapType = getCurrentMapType()) =>
+		getMapConfig(mapType).borderResources
+
+	const getBorderResourcePath = (mapType = getCurrentMapType(), borderLevel = 'country') =>
+		getBorderResourcePaths(mapType)?.[borderLevel]
+		?? getBorderResourcePaths(mapType)?.country
+		?? ''
 
 	const getChunkBounds = (mapType = getCurrentMapType()) =>
 		getMapConfig(mapType).chunkBounds
@@ -126,6 +136,7 @@
 		getMapConfig,
 		detectMapTypeFromHostname,
 		getCurrentMapType,
+		getBorderResourcePaths,
 		getBorderResourcePath,
 		getChunkBounds,
 		shouldInjectDynmapPlusChunksLayer,

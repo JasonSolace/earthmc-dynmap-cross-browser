@@ -23,6 +23,7 @@ function loadMenu(options = {}) {
 			"formatMapModeLabel",
 			"addMainMenu",
 			"addOptions",
+			"resolveLinkedDynmapPlusLayerToggleChanges",
 			"parseZoomFromTileUrl",
 			"getPlanningPreviewScaleInfo",
 			"getScaledPreviewDiameterMetrics",
@@ -257,6 +258,35 @@ test("menu options section rehomes Dynmap+ leaflet labels and preserves regular 
 	assert.ok(optionsMenu);
 	assert.equal(optionsMenu.children.includes(dynmapLabel), true);
 	assert.equal(optionsMenu.children.includes(regularLabel), false);
+});
+
+test("menu keeps country and state border toggles mutually exclusive", () => {
+	const { exports } = loadMenu();
+
+	assert.deepEqual(
+		Array.from(
+			exports.resolveLinkedDynmapPlusLayerToggleChanges("stateBorders", true).entries(),
+		),
+		[
+			["stateBorders", true],
+			["countryBorders", false],
+		],
+	);
+	assert.deepEqual(
+		Array.from(
+			exports.resolveLinkedDynmapPlusLayerToggleChanges("countryBorders", true).entries(),
+		),
+		[
+			["countryBorders", true],
+			["stateBorders", false],
+		],
+	);
+	assert.deepEqual(
+		Array.from(
+			exports.resolveLinkedDynmapPlusLayerToggleChanges("stateBorders", false).entries(),
+		),
+		[["stateBorders", false]],
+	);
 });
 
 test("menu shell builds the floating sidebar with the expected live mode label", () => {

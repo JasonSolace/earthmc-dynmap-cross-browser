@@ -30,10 +30,14 @@ function loadMarkerEngine(options = {}) {
 			"checkOverclaimedNationless",
 			"patchLeafletLayerControls",
 			"getPlanningProjectionSignals",
+			"modifyMarkersInPage",
 		],
 		{
 			extraGlobals: {
 				EMCDYNMAPPLUS_MAP: {
+					getBorderResourcePaths: () => ({
+						country: "resources/borders.aurora.json",
+					}),
 					getBorderResourcePath: () => "resources/borders.aurora.json",
 					getCurrentMapType: () => "aurora",
 					getChunkBounds: () => ({
@@ -198,6 +202,144 @@ test("marker engine appends a sanitized planning layer from stored nations", () 
 	assert.match(planningLayer.markers[0].popup, /X: 13/);
 	assert.match(planningLayer.markers[0].popup, /Z: -8/);
 	assert.match(planningLayer.markers[0].popup, /Range: 4097 blocks/);
+});
+
+test("marker engine appends separate country and state border layers", async () => {
+	const { exports } = loadMarkerEngine({
+		extraGlobals: {
+			EMCDYNMAPPLUS_MAP: {
+				getBorderResourcePaths: () => ({
+					country: "resources/borders.nostra.countries.json",
+					state: "resources/borders.nostra.states-and-countries.json",
+				}),
+				getBorderResourcePath: () => "resources/borders.nostra.countries.json",
+				getCurrentMapType: () => "nostra",
+				getChunkBounds: () => ({
+					L: -32,
+					R: 32,
+					U: -32,
+					D: 32,
+				}),
+				shouldInjectDynmapPlusChunksLayer: () => false,
+				getMapApiUrl: (baseUrl, resourcePath = "") =>
+					`${String(baseUrl).replace(/\/+$/, "")}/nostra${
+						resourcePath ? `/${String(resourcePath).replace(/^\/+/, "")}` : ""
+					}`,
+				getArchiveMarkersSourceUrl: (date) =>
+					date < 20240701
+						? "https://earthmc.net/map/aurora/tiles/_markers_/marker_earth.json"
+						: "https://map.earthmc.net/tiles/minecraft_overworld/markers.json",
+				getNationClaimBonus: (numNationResidents) =>
+					numNationResidents >= 20 ? 10 : 0,
+			},
+		},
+		fetchImpl: async (url) => ({
+			ok: true,
+			status: 200,
+			url: String(url),
+			clone() {
+				return this;
+			},
+			async json() {
+				if (String(url).includes("borders.nostra.countries.json")) {
+					return {
+						country_line: {
+							x: [0, 16],
+							z: [0, 16],
+						},
+					};
+				}
+
+				if (String(url).includes("borders.nostra.states-and-countries.json")) {
+					return {
+						state_line: {
+							x: [32, 48],
+							z: [32, 48],
+						},
+					};
+				}
+
+				return {};
+			},
+		}),
+	});
+
+	const result = await exports.modifyMarkersInPage([
+		{
+			id: "towny",
+			name: "Towns",
+			markers: [
+				{
+					type: "polygon",
+					tooltip:
+						'<div><span style="font-size:120%;"><b>Test Town</b></span> (Nationless)\n    <i>/town set board [msg]</i></div>',
+					popup:
+						'<div><span style="font-size:120%;"><b>Test Town</b></span><br>\nMayor: <b>MayorOne</b>\n\t<br>\nCouncillors: <b>None</b>\n\t<br>\n<details><summary>Residents</summary>\n    \tMayorOne\n   \t</details>\n   \t<br>\n<i>/town set board [msg]</i> \n    <br>\nFlags: <b>true</b> <b>false</b></div>',
+					points: [[[
+						{ x: 0, z: 0 },
+						{ x: 16, z: 0 },
+						{ x: 16, z: 16 },
+						{ x: 0, z: 16 },
+					]]],
+				},
+			],
+		},
+	]);
+
+	assert.ok(result.find((layer) => layer.id === "countryBorders"));
+	assert.ok(result.find((layer) => layer.id === "stateBorders"));
+	assert.equal(result.find((layer) => layer.id === "countryBorders").markers.length, 1);
+	assert.equal(result.find((layer) => layer.id === "stateBorders").markers.length, 1);
+});
+
+test("marker engine keeps Aurora on country borders only", async () => {
+	const { exports } = loadMarkerEngine({
+		fetchImpl: async (url) => ({
+			ok: true,
+			status: 200,
+			url: String(url),
+			clone() {
+				return this;
+			},
+			async json() {
+				if (String(url).includes("borders.aurora.json")) {
+					return {
+						country_line: {
+							x: [0, 16],
+							z: [0, 16],
+						},
+					};
+				}
+
+				return {};
+			},
+		}),
+	});
+
+	const result = await exports.modifyMarkersInPage([
+		{
+			id: "towny",
+			name: "Towns",
+			markers: [
+				{
+					type: "polygon",
+					tooltip:
+						'<div><span style="font-size:120%;"><b>Test Town</b></span> (Nationless)\n    <i>/town set board [msg]</i></div>',
+					popup:
+						'<div><span style="font-size:120%;"><b>Test Town</b></span><br>\nMayor: <b>MayorOne</b>\n\t<br>\nCouncillors: <b>None</b>\n\t<br>\n<details><summary>Residents</summary>\n    \tMayorOne\n   \t</details>\n   \t<br>\n<i>/town set board [msg]</i> \n    <br>\nFlags: <b>true</b> <b>false</b></div>',
+					points: [[[
+						{ x: 0, z: 0 },
+						{ x: 16, z: 0 },
+						{ x: 16, z: 16 },
+						{ x: 0, z: 16 },
+					]]],
+				},
+			],
+		},
+	]);
+
+	assert.ok(result.find((layer) => layer.id === "countryBorders"));
+	assert.equal(result.find((layer) => layer.id === "stateBorders"), undefined);
 });
 
 test("marker engine rewrites squaremap town descriptions and alliance labels", () => {

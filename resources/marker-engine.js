@@ -41,15 +41,17 @@ const OAPI_REQ_PER_MIN = 180;
 const OAPI_ITEMS_PER_REQ = 100;
 
 const EXTRA_BORDER_OPTS = {
-	label: "Country Border",
+	label: "Border",
 	opacity: 0.5,
 	weight: 3,
 	color: "#000000",
 	markup: false,
 };
 
-const getCurrentBordersResourcePath = () =>
-	EARTHMC_MAP?.getBorderResourcePath?.() ?? "resources/borders.aurora.json";
+const getCurrentBorderResourcePaths = () =>
+	EARTHMC_MAP?.getBorderResourcePaths?.() ?? {
+		country: "resources/borders.aurora.json",
+	};
 const getCurrentMapType = () => EARTHMC_MAP?.getCurrentMapType?.() ?? "aurora";
 const getCurrentChunkBounds = () =>
 	EARTHMC_MAP?.getChunkBounds?.(getCurrentMapType()) ?? {
@@ -74,7 +76,13 @@ const getArchiveMarkersSourceUrl = (date) =>
 const getNationClaimBonus = (numNationResidents) =>
 	EARTHMC_MAP?.getNationClaimBonus?.(numNationResidents, getCurrentMapType()) ?? 0;
 
-function getUserscriptBorders() {
+function getUserscriptBorders(resourcePath) {
+	const filename = String(resourcePath || "").split("/").pop() || "";
+
+	if (typeof BORDERS_BY_RESOURCE !== "undefined") {
+		return BORDERS_BY_RESOURCE[filename] ?? null;
+	}
+
 	if (typeof BORDERS_BY_MAP !== "undefined") {
 		return BORDERS_BY_MAP[getCurrentMapType()] ?? BORDERS_BY_MAP.aurora ?? null;
 	}
@@ -96,8 +104,8 @@ const PLANNING_CENTER_RADIUS = 48;
 let parsedMarkers = [];
 let cachedAlliances = null;
 let cachedApiNations = null;
-let cachedStyledBorders = null;
-let pendingBordersLoad = null;
+const cachedStyledBorders = new Map();
+const pendingBordersLoads = new Map();
 
 const cachedArchives = new Map();
 const pendingArchiveLoads = new Map();
@@ -122,9 +130,15 @@ const DYNMAP_PLUS_LAYER_DEFINITIONS = Object.freeze({
 		owner: DYNMAP_PLUS_LAYER_OWNER,
 		section: DYNMAP_PLUS_LAYER_SECTION,
 	}),
-	borders: Object.freeze({
-		id: "borders",
+	countryBorders: Object.freeze({
+		id: "countryBorders",
 		name: "Country Borders",
+		owner: DYNMAP_PLUS_LAYER_OWNER,
+		section: DYNMAP_PLUS_LAYER_SECTION,
+	}),
+	stateBorders: Object.freeze({
+		id: "stateBorders",
+		name: "State Borders",
 		owner: DYNMAP_PLUS_LAYER_OWNER,
 		section: DYNMAP_PLUS_LAYER_SECTION,
 	}),
@@ -384,39 +398,48 @@ const {
 	debugInfo: pageMarkersDebugInfo,
 });
 
-async function getStyledBorders() {
-	if (cachedStyledBorders != null) return cachedStyledBorders;
+async function getStyledBorders(resourcePath) {
+	if (!resourcePath) return null;
+	if (cachedStyledBorders.has(resourcePath)) return cachedStyledBorders.get(resourcePath);
 
-	const userscriptBorders = getUserscriptBorders();
+	const userscriptBorders = getUserscriptBorders(resourcePath);
 	if (userscriptBorders) {
-		cachedStyledBorders = Object.fromEntries(
+		const styledUserscriptBorders = Object.fromEntries(
 			Object.entries(userscriptBorders).map(([key, border]) => [key, { ...border, ...EXTRA_BORDER_OPTS }]),
 		);
-		return cachedStyledBorders;
+		cachedStyledBorders.set(resourcePath, styledUserscriptBorders);
+		return styledUserscriptBorders;
 	}
 
-	if (!pendingBordersLoad) {
-		const borderFilename = getCurrentBordersResourcePath().split("/").pop() || "borders.aurora.json";
-		pendingBordersLoad = fetch(getResourceUrl(borderFilename))
-			.then(async (response) => {
-				if (!response.ok) return null;
+	if (!pendingBordersLoads.has(resourcePath)) {
+		const borderFilename = resourcePath.split("/").pop() || "borders.aurora.json";
+		pendingBordersLoads.set(
+			resourcePath,
+			fetch(getResourceUrl(borderFilename))
+				.then(async (response) => {
+					if (!response.ok) return null;
 
-				const borders = await response.json();
-				return Object.fromEntries(
-					Object.entries(borders).map(([key, border]) => [key, { ...border, ...EXTRA_BORDER_OPTS }]),
-				);
-			})
-			.catch((err) => {
-				console.error(`${MARKER_ENGINE_PREFIX}: failed to load borders resource`, err);
-				return null;
-			})
-			.finally(() => {
-				pendingBordersLoad = null;
-			});
+					const borders = await response.json();
+					return Object.fromEntries(
+						Object.entries(borders).map(([key, border]) => [key, { ...border, ...EXTRA_BORDER_OPTS }]),
+					);
+				})
+				.catch((err) => {
+					console.error(`${MARKER_ENGINE_PREFIX}: failed to load borders resource`, {
+						resourcePath,
+						error: err,
+					});
+					return null;
+				})
+				.finally(() => {
+					pendingBordersLoads.delete(resourcePath);
+				}),
+		);
 	}
 
-	cachedStyledBorders = await pendingBordersLoad;
-	return cachedStyledBorders;
+	const styledBorders = await pendingBordersLoads.get(resourcePath);
+	cachedStyledBorders.set(resourcePath, styledBorders);
+	return styledBorders;
 }
 
 function addChunksLayer(data) {
@@ -435,18 +458,18 @@ function addChunksLayer(data) {
 	});
 }
 
-function addCountryBordersLayer(data, borders) {
+function addBorderLayer(data, definition, borders, failureLabel) {
 	try {
 		const points = Object.values(borders).flatMap((line) => borderEntryToPolylines(line));
 
-		return appendDynmapPlusManagedLayer(data, DYNMAP_PLUS_LAYER_DEFINITIONS.borders, {
+		return appendDynmapPlusManagedLayer(data, definition, {
 			order: 999,
 			hide: true,
 			control: true,
 			markers: [makePolyline(points)],
 		});
 	} catch (err) {
-		showPageAlert("Could not set up a layer of country borders. You may need to clear this website's data. If problem persists, contact the developer.");
+		showPageAlert(`Could not set up a layer of ${failureLabel}. You may need to clear this website's data. If problem persists, contact the developer.`);
 		console.error(err);
 		return null;
 	}
@@ -490,11 +513,33 @@ async function modifyMarkersInPage(data) {
 		result = addChunksLayer(result);
 	}
 
-	const borders = await getStyledBorders();
-	if (!borders) {
-		showPageAlert("An unexpected error occurred fetching the borders resource file.");
+	const borderResources = getCurrentBorderResourcePaths();
+	const countryBorders = await getStyledBorders(borderResources.country);
+	if (!countryBorders) {
+		showPageAlert("An unexpected error occurred fetching the country borders resource file.");
 	} else {
-		result = addCountryBordersLayer(result, borders) || result;
+		result =
+			addBorderLayer(
+				result,
+				DYNMAP_PLUS_LAYER_DEFINITIONS.countryBorders,
+				countryBorders,
+				"country borders",
+			) || result;
+	}
+
+	if (borderResources.state) {
+		const stateBorders = await getStyledBorders(borderResources.state);
+		if (!stateBorders) {
+			showPageAlert("An unexpected error occurred fetching the state borders resource file.");
+		} else {
+			result =
+				addBorderLayer(
+					result,
+					DYNMAP_PLUS_LAYER_DEFINITIONS.stateBorders,
+					stateBorders,
+					"state borders",
+				) || result;
+		}
 	}
 	if (mapMode === "planning") {
 		result = addPlanningLayer(result);

@@ -42,13 +42,24 @@ test("map-config exposes active border and chunk settings per map", () => {
 	});
 	const mapConfig = context.EMCDYNMAPPLUS_MAP;
 
+	assert.deepEqual(normalize(mapConfig.getBorderResourcePaths("aurora")), {
+		country: "resources/borders.aurora.json",
+	});
 	assert.equal(
 		mapConfig.getBorderResourcePath("aurora"),
 		"resources/borders.aurora.json",
 	);
 	assert.equal(
+		mapConfig.getBorderResourcePath("aurora", "state"),
+		"resources/borders.aurora.json",
+	);
+	assert.equal(
 		mapConfig.getBorderResourcePath("nostra"),
-		"resources/borders.nostra.json",
+		"resources/borders.nostra.countries.json",
+	);
+	assert.equal(
+		mapConfig.getBorderResourcePath("nostra", "state"),
+		"resources/borders.nostra.states-and-countries.json",
 	);
 	assert.equal(mapConfig.shouldInjectDynmapPlusChunksLayer("aurora"), true);
 	assert.equal(mapConfig.shouldInjectDynmapPlusChunksLayer("nostra"), false);

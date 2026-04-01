@@ -143,6 +143,10 @@ function addOptions(...args) {
 	return menuOptions.addOptions(...args);
 }
 
+function resolveLinkedDynmapPlusLayerToggleChanges(...args) {
+	return menuOptions.resolveLinkedDynmapPlusLayerToggleChanges(...args);
+}
+
 function insertCustomStylesheets(...args) {
 	return menuOptions.insertCustomStylesheets(...args);
 }

@@ -1,32 +1,31 @@
 ## Source GeoJSON
 
-This directory is the source of truth for Nostra border generation.
+This directory is the source of truth for shipped border generation.
+The current source files were derived from Natural Earth 1:10m GeoJSON data:
+
+- https://www.naturalearthdata.com/
 
 Files:
-- `borders.config.json`: exclusions and renames applied during the merged build
 - `countries.geojson`: country-level source GeoJSON
-- `us-states-and-territories.geojson`: US states, DC, and US territories
+- `states-and-countries.geojson`: merged source GeoJSON for the state-border view
 
-The shipped border file at `resources/borders.nostra.json` is generated from these raw inputs. Do not treat the generated file as the editable source of truth.
+The shipped border files under `resources/borders.*.json` are generated from these raw inputs. Do not treat the generated files as the editable source of truth.
 
-Rebuild the final deduped Nostra borders resource with:
+Rebuild the shipped Aurora and Nostra border resources with:
 
 ```bash
-npm run dedupe:borders:nostra
+npm run build:borders
 ```
 
 The rebuild currently:
-- loads every `.geojson` file in this directory
-- uses the Nostra projection window `latMin=-59.4` and `latMax=83.1`
-- applies excludes and renames from `borders.config.json`
+- projects the same two source GeoJSON files into both world coordinate systems
+- writes a country-only resource for Aurora
+- writes country-only and state-plus-country resources for Nostra
 - dedupes shared raw borders before projection and simplification
-- writes the final linework to `resources/borders.nostra.json`
+- writes the final linework to `resources/borders.*.json`
 
 Optional verification:
 
 ```bash
 npm run check:borders:duplicates
 ```
-
-If you add more subdivision datasets later, keep the raw GeoJSON here and extend the rebuild command rather than hand-merging generated Nostra JSON.
-In the normal case, adding a dataset is just dropping another `.geojson` file into this directory and rerunning the rebuild. Only touch `borders.config.json` if the new data should replace an existing parent outline or if it introduces a name collision.

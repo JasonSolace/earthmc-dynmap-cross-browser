@@ -4,9 +4,10 @@ import * as path from 'path'
 
 const FORK_REPO = 'JasonSolace/earthmc-dynmap-cross-browser'
 const STYLE_CSS = readFileSync('resources/style.css', 'utf8')
-const BORDERS_BY_MAP = {
-	aurora: JSON.parse(readFileSync('resources/borders.aurora.json', 'utf8')),
-	nostra: JSON.parse(readFileSync('resources/borders.nostra.json', 'utf8')),
+const BORDERS_BY_RESOURCE = {
+	'borders.aurora.json': JSON.parse(readFileSync('resources/borders.aurora.json', 'utf8')),
+	'borders.nostra.countries.json': JSON.parse(readFileSync('resources/borders.nostra.countries.json', 'utf8')),
+	'borders.nostra.states-and-countries.json': JSON.parse(readFileSync('resources/borders.nostra.states-and-countries.json', 'utf8')),
 }
 const MANIFEST = JSON.parse(readFileSync('manifest.json', 'utf8'))
 const USERSCRIPT_ASSET_URLS = {
@@ -51,7 +52,7 @@ const buildOpts = {
 	define: {
 		IS_USERSCRIPT: 'true',
 		STYLE_CSS: JSON.stringify(STYLE_CSS),
-		BORDERS_BY_MAP: JSON.stringify(BORDERS_BY_MAP),
+		BORDERS_BY_RESOURCE: JSON.stringify(BORDERS_BY_RESOURCE),
 		USERSCRIPT_ASSET_URLS: JSON.stringify(USERSCRIPT_ASSET_URLS),
 		MANIFEST: JSON.stringify(MANIFEST),
 		window: 'unsafeWindow',
