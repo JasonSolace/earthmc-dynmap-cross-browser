@@ -87,6 +87,7 @@ class FakeElement extends FakeNode {
 		this.type = "";
 		this.placeholder = "";
 		this.open = false;
+		this.__listeners = new Map();
 		this.__queryMap = new Map();
 		this.__queryAllMap = new Map();
 		this.__closestMap = new Map();
@@ -165,11 +166,23 @@ class FakeElement extends FakeNode {
 		return nextChild;
 	}
 
-	addEventListener() {}
+	addEventListener(type, listener) {
+		const existing = this.__listeners.get(type) ?? [];
+		existing.push(listener);
+		this.__listeners.set(type, existing);
+	}
 
-	removeEventListener() {}
+	removeEventListener(type, listener) {
+		const existing = this.__listeners.get(type) ?? [];
+		this.__listeners.set(
+			type,
+			existing.filter((candidate) => candidate !== listener),
+		);
+	}
 
-	dispatchEvent() {
+	dispatchEvent(event) {
+		const existing = this.__listeners.get(event.type) ?? [];
+		existing.forEach((listener) => listener(event));
 		return true;
 	}
 

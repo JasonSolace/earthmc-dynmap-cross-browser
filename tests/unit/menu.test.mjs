@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { loadPlainScripts } from "./helpers/script-harness.mjs";
+import { loadPlainScript, loadPlainScripts } from "./helpers/script-harness.mjs";
 
 const normalize = (value) => JSON.parse(JSON.stringify(value));
 
@@ -206,6 +206,58 @@ test("menu validates archive dates before switching the extension into archive m
 	assert.equal(localStorage["emcdynmapplus-last-live-mapmode"], "alliances");
 	assert.equal(localStorage["emcdynmapplus-archive-date"], "20260330");
 	assert.equal(exports.isValidArchiveDateInput("2026-03-30"), true);
+});
+
+test("menu options dark-mode toggle reflects effective system-dark startup state", () => {
+	const env = loadPlainScript("src/menu-options.js", [], {
+		extraGlobals: {
+			matchMedia(query) {
+				return {
+					matches: query === "(prefers-color-scheme: dark)",
+				};
+			},
+		},
+	});
+	const optionsHelpers = env.context.EMCDYNMAPPLUS_MENU_OPTIONS.createMenuOptions({
+		createElement(tagName, props = {}, children = []) {
+			const element = env.document.createElement(tagName);
+			if (props.id) element.id = props.id;
+			if (props.className) element.className = props.className;
+			if (props.text) element.textContent = props.text;
+			if (props.htmlFor) element.htmlFor = props.htmlFor;
+			if (props.type) element.type = props.type;
+			if (props.attrs) {
+				for (const [name, value] of Object.entries(props.attrs)) {
+					element.setAttribute(name, value);
+				}
+			}
+			for (const child of children) {
+				if (child != null) element.appendChild(child);
+			}
+			return element;
+		},
+		addElement(parent, child) {
+			parent.appendChild(child);
+			return child;
+		},
+	});
+
+	const layersList = env.document.createElement("div");
+	const section = optionsHelpers.addOptions(layersList, "default");
+
+	function findById(node, id) {
+		if (!node || typeof node !== "object") return null;
+		if (node.id === id) return node;
+		for (const child of node.children || []) {
+			const result = findById(child, id);
+			if (result) return result;
+		}
+		return null;
+	}
+
+	const darkModeToggle = findById(section, "toggle-darkmode");
+	assert.ok(darkModeToggle);
+	assert.equal(darkModeToggle.checked, true);
 });
 
 test("menu options section rehomes Dynmap+ leaflet labels and preserves regular labels", () => {

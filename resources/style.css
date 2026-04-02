@@ -141,7 +141,7 @@ select {
 	z-index: 1001;
 	display: inline-block !important;
 	width: auto !important;
-	min-width: 202px;
+	min-width: 0;
 	padding: 0;
 	float: left !important;
 	text-align: left;
@@ -151,10 +151,16 @@ select {
 	backdrop-filter: none;
 	overflow: visible;
 	box-sizing: border-box;
+	pointer-events: none;
 }
 
 #sidebar[open] {
 	z-index: 1001;
+}
+
+#sidebar > summary,
+#sidebar > #sidebar-content {
+	pointer-events: auto;
 }
 
 #sidebar-toggle {
@@ -172,6 +178,8 @@ select {
 	box-shadow: var(--panel-shadow);
 	backdrop-filter: blur(20px) saturate(145%);
 	cursor: pointer;
+	user-select: none;
+	-webkit-user-select: none;
 }
 
 #sidebar-toggle::-webkit-details-marker {
@@ -195,6 +203,7 @@ select {
 	font-family: var(--font-display);
 	font-size: 16px;
 	line-height: 1;
+	color: var(--text-strong) !important;
 }
 
 .sidebar-summary-mode {
@@ -239,6 +248,11 @@ select {
 	overflow-y: auto;
 	overscroll-behavior: contain;
 	scrollbar-gutter: stable;
+}
+
+#sidebar[data-leaflet-layer-menu-active="true"] #sidebar-content {
+	visibility: hidden;
+	pointer-events: none;
 }
 
 .sidebar-header {
@@ -317,6 +331,7 @@ select {
 
 .sidebar-section-title {
 	font-size: 15px;
+	color: var(--text-strong) !important;
 }
 
 .sidebar-section-copy,

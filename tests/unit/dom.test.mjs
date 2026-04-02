@@ -35,6 +35,28 @@ test("insertSidebarMenu keeps the toolkit box ahead of Leaflet's layer toggle", 
 	assert.equal(host.children[1], layerToggle);
 });
 
+test("insertSidebarMenu only binds anti-pan handlers to the sidebar control", async () => {
+	const env = loadPlainScript("src/dom.js", ["insertSidebarMenu"], {
+		extraGlobals: {
+			addMainMenu(parent) {
+				const sidebar = env.document.createElement("details");
+				sidebar.id = "sidebar";
+				parent.appendChild(sidebar);
+				return sidebar;
+			},
+		},
+	});
+
+	const host = env.document.createElement("div");
+	env.document.__setQuery(".leaflet-top.leaflet-left", host);
+
+	const sidebar = await env.exports.insertSidebarMenu();
+
+	assert.equal(sidebar?.id, "sidebar");
+	assert.equal((host.__listeners.get("mousedown") ?? []).length, 0);
+	assert.equal((sidebar?.__listeners.get("mousedown") ?? []).length > 0, true);
+});
+
 test("editUILayout keeps zoom near the top-left layer controls while grouping link and coordinates at bottom-left", async () => {
 	const env = loadPlainScript("src/dom.js", ["editUILayout"], {});
 
@@ -69,8 +91,8 @@ test("editUILayout keeps zoom near the top-left layer controls while grouping li
 
 	assert.equal(topLeft.children.length, 3);
 	assert.equal(topLeft.children[0], sidebar);
-	assert.equal(topLeft.children[1], layerToggle);
-	assert.equal(topLeft.children[2], zoomControl);
+	assert.equal(topLeft.children[1], zoomControl);
+	assert.equal(topLeft.children[2], layerToggle);
 
 	assert.equal(bottomLeft.children.length, 1);
 	assert.equal(bottomLeft.children[0]?.id, "coords-container");

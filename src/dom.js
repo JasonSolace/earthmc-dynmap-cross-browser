@@ -286,12 +286,15 @@ function initToggleOptions() {
 	const darkened = localStorage['emcdynmapplus-darkened'] == 'true' ? true : false
 	waitForElement('.leaflet-tile-pane').then(_ => toggleDarkened(darkened))
 
-    const darkPref = localStorage['emcdynmapplus-darkmode']
-    const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)')?.matches
-    if (darkPref === 'true' || (!darkPref && systemDark)) {
-        localStorage['emcdynmapplus-darkmode'] = 'true'
-        loadDarkMode()
-    }
+	const darkPref = localStorage['emcdynmapplus-darkmode']
+	const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)')?.matches
+	const shouldUseDarkMode = darkPref === 'true' || (darkPref == null && systemDark)
+	if (shouldUseDarkMode) {
+		if (darkPref == null) localStorage['emcdynmapplus-darkmode'] = 'true'
+		loadDarkMode()
+	} else {
+		unloadDarkMode()
+	}
 
 	const showServerInfo = localStorage['emcdynmapplus-serverinfo'] == 'true' ? true : false
 	waitForElement('#server-info').then(_ => toggleServerInfo(showServerInfo))
@@ -446,11 +449,11 @@ async function editUILayout() {
 			&& !child.classList.contains('link')
 		)
 		const sidebar = siblings.find(child => child.id === 'sidebar') ?? null
-		const reference = layerToggle ?? sidebar
-
-		if (reference instanceof HTMLElement) {
-			const referenceIndex = siblings.indexOf(reference)
-			const nextSibling = siblings[referenceIndex + 1] ?? null
+		if (layerToggle instanceof HTMLElement) {
+			topLeft.insertBefore(zoomControl, layerToggle)
+		} else if (sidebar instanceof HTMLElement) {
+			const sidebarIndex = siblings.indexOf(sidebar)
+			const nextSibling = siblings[sidebarIndex + 1] ?? null
 			if (nextSibling instanceof HTMLElement) topLeft.insertBefore(zoomControl, nextSibling)
 			else topLeft.appendChild(zoomControl)
 		} else if (topLeft.firstChild instanceof HTMLElement) {
@@ -483,16 +486,17 @@ function tryInsertNationClaimsPanel(mapMode) {
 /** @returns {Promise<Element | null>} The "#server-info" element. */
 function insertServerInfoPanel() {
 	return waitForElement('.leaflet-top.leaflet-right').then(el => {
-		disablePanAndZoom(el)
-		return addServerInfoPanel(el)
+		const panel = addServerInfoPanel(el)
+		if (panel instanceof HTMLElement) disablePanAndZoom(panel)
+		return panel
 	})
 }
 
 /** @returns {Promise<Element | null>} The "#sidebar" element. */
 function insertSidebarMenu() {
     return waitForElement('.leaflet-top.leaflet-left').then(el => {
-        disablePanAndZoom(el)
         const sidebar = addMainMenu(el)
+        if (sidebar instanceof HTMLElement) disablePanAndZoom(sidebar)
         if (sidebar instanceof Node && el.firstChild !== sidebar) {
             el.insertBefore(sidebar, el.firstChild)
         }

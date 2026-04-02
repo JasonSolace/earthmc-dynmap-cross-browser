@@ -170,6 +170,47 @@
 			return section;
 		}
 
+		function updateSidebarLayerMenuPriority(sidebar) {
+			if (!(sidebar instanceof HTMLElement)) return false;
+
+			const expandedLayerControl = document.querySelector(
+				".leaflet-control-layers-expanded",
+			);
+			const isLayerMenuActive =
+				expandedLayerControl instanceof HTMLElement &&
+				expandedLayerControl !== sidebar;
+
+			if (isLayerMenuActive) {
+				sidebar.dataset.leafletLayerMenuActive = "true";
+			} else {
+				delete sidebar.dataset.leafletLayerMenuActive;
+			}
+
+			return isLayerMenuActive;
+		}
+
+		function bindSidebarLayerMenuPriority(sidebar) {
+			if (!(sidebar instanceof HTMLElement)) return null;
+
+			const update = () => updateSidebarLayerMenuPriority(sidebar);
+			update();
+
+			const observeTarget =
+				document.querySelector(".leaflet-control-container") ||
+				document.body ||
+				document.documentElement;
+			if (!(observeTarget instanceof Node)) return null;
+
+			const observer = new MutationObserver(() => update());
+			observer.observe(observeTarget, {
+				subtree: true,
+				childList: true,
+				attributes: true,
+				attributeFilter: ["class"],
+			});
+			return observer;
+		}
+
 		function addMainMenu(parent) {
 			const existingSidebar = parent.querySelector("#sidebar");
 			if (existingSidebar) return existingSidebar;
@@ -191,6 +232,7 @@
 					},
 				}),
 			);
+			bindSidebarLayerMenuPriority(sidebar);
 			let sidebarSummary = null;
 			let sidebarContent = null;
 			sidebar.addEventListener("toggle", () => {
@@ -246,6 +288,8 @@
 		}
 
 		return {
+			updateSidebarLayerMenuPriority,
+			bindSidebarLayerMenuPriority,
 			updateSidebarContentPosition,
 			addMainMenu,
 			addSidebarSummary,

@@ -32,6 +32,22 @@
 			throw new Error("emcdynmapplus: menu options helpers require addElement");
 		}
 
+		function isDarkModeEnabledByPreference() {
+			const storedPreference = localStorage["emcdynmapplus-darkmode"];
+			if (storedPreference === "true") return true;
+			if (storedPreference === "false") return false;
+			if (
+				document.documentElement?.getAttribute?.("data-emcdynmapplus-theme") ===
+				"dark"
+			) {
+				return true;
+			}
+
+			return Boolean(
+				window.matchMedia?.("(prefers-color-scheme: dark)")?.matches,
+			);
+		}
+
 		function addOptions(layersList, curMapMode = getStoredCurrentMapMode()) {
 			const existingOptions = layersList.querySelector(
 				"#emcdynmapplus-layer-options",
@@ -314,7 +330,10 @@
 					},
 				}),
 			);
-			checkbox.checked = localStorage["emcdynmapplus-" + variable] === "true";
+			checkbox.checked =
+				variable === "darkmode"
+					? isDarkModeEnabledByPreference()
+					: localStorage["emcdynmapplus-" + variable] === "true";
 			return checkbox;
 		}
 
@@ -353,7 +372,10 @@
 					text: ` ${optionText}`,
 				}),
 			);
-			checkbox.checked = localStorage["emcdynmapplus-" + variable] === "true";
+			checkbox.checked =
+				variable === "darkmode"
+					? isDarkModeEnabledByPreference()
+					: localStorage["emcdynmapplus-" + variable] === "true";
 			return checkbox;
 		}
 
@@ -529,6 +551,7 @@
 			syncDynmapPlusLayerOptions,
 			observeDynmapPlusLayerOptions,
 			isDynmapPlusLeafletLayerLabel,
+			isDarkModeEnabledByPreference,
 			addCheckboxOption,
 			addLayerCheckboxOption,
 			toggleDarkened,
