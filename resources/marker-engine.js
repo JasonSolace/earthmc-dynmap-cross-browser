@@ -357,6 +357,14 @@ const {
 	dynmapPlusLayerSection: DYNMAP_PLUS_LAYER_SECTION,
 	layerDefinitionById: DYNMAP_PLUS_LAYER_DEFINITION_BY_ID,
 	layerDefinitionByName: DYNMAP_PLUS_LAYER_DEFINITION_BY_NAME,
+	syntheticUnderzoomConfig:
+		getCurrentMapType() === "nostra"
+			? {
+				enabled: true,
+				minZoom: -2,
+				minNativeZoom: 0,
+			}
+			: null,
 });
 
 const markerEnginePlanningFactory =

@@ -7,16 +7,38 @@ function createMarkerEnginePageMap({
 	debugInfo = () => {},
 	pageMapsKey = "__EMCDYNMAPPLUS_LEAFLET_MAPS__",
 	pageMapPatchedKey = "__EMCDYNMAPPLUS_LEAFLET_MAP_PATCHED__",
+	pageMapRuntimeRegistrationPatchedKey = "__EMCDYNMAPPLUS_PAGE_MAP_RUNTIME_REGISTRATION_PATCHED__",
 	pageLayerControlPatchedKey = "__EMCDYNMAPPLUS_PAGE_LAYER_CONTROL_PATCHED__",
+	pageMapZoomBoundsPatchedKey = "__EMCDYNMAPPLUS_PAGE_MAP_ZOOM_BOUNDS_PATCHED__",
+	pageMapGridLayerPatchedKey = "__EMCDYNMAPPLUS_PAGE_MAP_GRID_LAYER_PATCHED__",
 	pageMapListenersKey = "__EMCDYNMAPPLUS_PAGE_MAP_STATE_LISTENERS__",
+	pageMapSyntheticUnderzoomKey = "__EMCDYNMAPPLUS_PAGE_MAP_SYNTHETIC_UNDERZOOM__",
 	pageMapZoomAttr = "data-emcdynmapplus-leaflet-zoom",
 	pageMapContainerAttr = "data-emcdynmapplus-leaflet-map-container",
 	dynmapPlusLayerOwner = "dynmapplus",
 	dynmapPlusLayerSection = "dynmapplus",
 	layerDefinitionById = new Map(),
 	layerDefinitionByName = new Map(),
+	syntheticUnderzoomConfig = null,
 } = {}) {
 	const dynmapPlusLayerMetaByLayer = new WeakMap();
+
+	function normalizeSyntheticUnderzoomConfig(config) {
+		if (!config || config.enabled === false) return null;
+
+		const minZoom = Number(config.minZoom);
+		const minNativeZoom = Number(config.minNativeZoom);
+		return {
+			enabled: true,
+			minZoom: Number.isFinite(minZoom) ? Math.round(minZoom) : -2,
+			minNativeZoom: Number.isFinite(minNativeZoom)
+				? Math.round(minNativeZoom)
+				: 0,
+		};
+	}
+
+	const normalizedSyntheticUnderzoomConfig =
+		normalizeSyntheticUnderzoomConfig(syntheticUnderzoomConfig);
 
 	function getKnownLeafletMaps() {
 		const knownMaps = globalThis[pageMapsKey];
@@ -85,6 +107,124 @@ function createMarkerEnginePageMap({
 			|| null;
 	}
 
+	function isLeafletGridLayerCandidate(layer) {
+		if (!layer || typeof layer !== "object") return false;
+		return typeof layer.getTileUrl === "function"
+			|| typeof layer.createTile === "function"
+			|| layer._tiles != null
+			|| layer._tileZoom != null;
+	}
+
+	function getLayerNativeMinZoom(layer, fallbackMinNativeZoom = 0) {
+		const explicitNativeMinZoom = Number(layer?.options?.minNativeZoom);
+		if (Number.isFinite(explicitNativeMinZoom)) {
+			return Math.round(explicitNativeMinZoom);
+		}
+
+		const declaredMinZoom = Number(layer?.options?.minZoom);
+		if (Number.isFinite(declaredMinZoom)) {
+			return Math.round(declaredMinZoom);
+		}
+
+		return Math.round(fallbackMinNativeZoom);
+	}
+
+	function applySyntheticUnderzoomToLayer(
+		layer,
+		config = normalizedSyntheticUnderzoomConfig,
+	) {
+		if (!config?.enabled || !isLeafletGridLayerCandidate(layer)) return false;
+
+		if (!layer.options || typeof layer.options !== "object") {
+			layer.options = {};
+		}
+
+		let changed = false;
+		// Keep native tile fetches pinned to the server's lowest real zoom while
+		// still allowing the map itself to move into negative synthetic zooms.
+		const nativeMinZoom = getLayerNativeMinZoom(layer, config.minNativeZoom);
+		if (layer.options.minNativeZoom !== nativeMinZoom) {
+			layer.options.minNativeZoom = nativeMinZoom;
+			changed = true;
+		}
+		if (
+			!Number.isFinite(Number(layer.options.minZoom))
+			|| Number(layer.options.minZoom) > config.minZoom
+		) {
+			layer.options.minZoom = config.minZoom;
+			changed = true;
+		}
+
+		if (changed && typeof layer.redraw === "function") {
+			try {
+				layer.redraw();
+			} catch (err) {
+				console.warn(`${pageMapPrefix}: failed to redraw underzoomed tile layer`, err);
+			}
+		}
+
+		return changed;
+	}
+
+	function applySyntheticUnderzoomToMap(
+		map,
+		config = normalizedSyntheticUnderzoomConfig,
+	) {
+		if (!config?.enabled || !map || typeof map !== "object") return false;
+
+		if (!map.options || typeof map.options !== "object") {
+			map.options = {};
+		}
+
+		let changed = false;
+		// Leaflet still needs the map floor lowered or scroll/zoom controls will
+		// clamp before any underzoomed tiles can be rendered.
+		if (
+			!Number.isFinite(Number(map.options.minZoom))
+			|| Number(map.options.minZoom) > config.minZoom
+		) {
+			map.options.minZoom = config.minZoom;
+			changed = true;
+		}
+
+		const knownLayers = map._layers ? Object.values(map._layers) : [];
+		for (const layer of knownLayers) {
+			if (applySyntheticUnderzoomToLayer(layer, config)) changed = true;
+		}
+
+		if (map[pageMapSyntheticUnderzoomKey] !== true && typeof map.on === "function") {
+			map.on("layeradd", (event) => {
+				applySyntheticUnderzoomToLayer(event?.layer, config);
+			});
+			map[pageMapSyntheticUnderzoomKey] = true;
+			changed = true;
+		}
+
+		if (changed) {
+			try {
+				map._updateZoomLevels?.();
+				map.fire?.("zoomlevelschange");
+			} catch (err) {
+				console.warn(`${pageMapPrefix}: failed to refresh map zoom levels after underzoom patch`, err);
+			}
+
+			const currentZoom = Number(map.getZoom?.());
+			if (
+				Number.isFinite(currentZoom)
+				&& currentZoom < config.minZoom
+				&& typeof map.setZoom === "function"
+			) {
+				try {
+					map.setZoom(config.minZoom);
+				} catch (err) {
+					console.warn(`${pageMapPrefix}: failed to clamp map zoom after underzoom patch`, err);
+				}
+			}
+		}
+
+		return changed;
+	}
+
 	function publishLeafletMapState(map = null) {
 		const targetMap = map || getPrimaryLeafletMap();
 		if (!targetMap) return;
@@ -121,6 +261,7 @@ function createMarkerEnginePageMap({
 		const knownMaps = ensureKnownLeafletMaps();
 		if (!knownMaps.includes(map)) {
 			knownMaps.push(map);
+			applySyntheticUnderzoomToMap(map);
 			attachLeafletMapStateListeners(map);
 			publishLeafletMapState(map);
 			debugInfo(`${pageMapPrefix}: registered Leaflet map`, describeLeafletMap(map, knownMaps.length - 1, source));
@@ -307,6 +448,72 @@ function createMarkerEnginePageMap({
 		return true;
 	}
 
+	function patchLeafletZoomBounds(
+		config = normalizedSyntheticUnderzoomConfig,
+	) {
+		if (!config?.enabled) return true;
+		if (globalThis[pageMapZoomBoundsPatchedKey]) return true;
+		if (!globalThis.L?.Map?.prototype) return false;
+
+		globalThis[pageMapZoomBoundsPatchedKey] = true;
+
+		const originalGetMinZoom = globalThis.L.Map.prototype.getMinZoom;
+		if (typeof originalGetMinZoom === "function") {
+			globalThis.L.Map.prototype.getMinZoom = function patchedGetMinZoom(...args) {
+				const originalValue = originalGetMinZoom.apply(this, args);
+				const numericOriginal = Number(originalValue);
+				if (!Number.isFinite(numericOriginal)) return config.minZoom;
+				return Math.min(numericOriginal, config.minZoom);
+			};
+		}
+
+		const originalLimitZoom = globalThis.L.Map.prototype._limitZoom;
+		if (typeof originalLimitZoom === "function") {
+			globalThis.L.Map.prototype._limitZoom = function patchedLimitZoom(zoom, ...args) {
+				const requestedZoom = Number(zoom);
+				const originalValue = originalLimitZoom.call(this, zoom, ...args);
+				const numericOriginal = Number(originalValue);
+				if (!Number.isFinite(requestedZoom)) return numericOriginal;
+				if (!Number.isFinite(numericOriginal)) {
+					return Math.max(config.minZoom, requestedZoom);
+				}
+				if (requestedZoom < config.minZoom) return config.minZoom;
+				if (requestedZoom < 0 && numericOriginal >= 0) return requestedZoom;
+				return numericOriginal;
+			};
+		}
+
+		debugInfo(`${pageMapPrefix}: patched Leaflet zoom bounds`);
+		return true;
+	}
+
+	function patchLeafletGridLayerUnderzoom(
+		config = normalizedSyntheticUnderzoomConfig,
+	) {
+		if (!config?.enabled) return true;
+		if (globalThis[pageMapGridLayerPatchedKey]) return true;
+		if (!globalThis.L?.GridLayer?.prototype) return false;
+
+		globalThis[pageMapGridLayerPatchedKey] = true;
+
+		const originalClampZoom = globalThis.L.GridLayer.prototype._clampZoom;
+		if (typeof originalClampZoom === "function") {
+			globalThis.L.GridLayer.prototype._clampZoom = function patchedGridLayerClampZoom(zoom, ...args) {
+				const requestedZoom = Number(zoom);
+				const originalValue = originalClampZoom.call(this, zoom, ...args);
+				const nativeMinZoom = getLayerNativeMinZoom(this, config.minNativeZoom);
+				const numericOriginal = Number(originalValue);
+				if (!Number.isFinite(requestedZoom)) return numericOriginal;
+				// Negative map zooms should still resolve to real zoom-0 tiles.
+				if (requestedZoom < nativeMinZoom) return nativeMinZoom;
+				return numericOriginal;
+			};
+		}
+
+		debugInfo(`${pageMapPrefix}: patched Leaflet grid layer underzoom`);
+		return true;
+	}
+
 	function patchLeafletMapCreation() {
 		if (globalThis[pageMapPatchedKey]) return true;
 		if (!globalThis.L?.Map || typeof globalThis.L.map !== "function") return false;
@@ -329,6 +536,40 @@ function createMarkerEnginePageMap({
 		};
 
 		debugInfo(`${pageMapPrefix}: patched Leaflet map creation hooks`);
+		return true;
+	}
+
+	function patchLeafletMapRuntimeRegistration() {
+		if (globalThis[pageMapRuntimeRegistrationPatchedKey]) return true;
+		if (!globalThis.L?.Map?.prototype) return false;
+
+		globalThis[pageMapRuntimeRegistrationPatchedKey] = true;
+		const methodsToWrap = [
+			"setView",
+			"setZoom",
+			"panTo",
+			"flyTo",
+			"_resetView",
+			"_move",
+			"_moveEnd",
+		];
+
+		// Some live pages create the Leaflet map before our factory hook lands, so
+		// we also register maps lazily the first time runtime methods are invoked.
+		for (const methodName of methodsToWrap) {
+			const originalMethod = globalThis.L.Map.prototype[methodName];
+			if (typeof originalMethod !== "function") continue;
+			if (originalMethod.__emcdynmapplusWrapped === true) continue;
+
+			const wrappedMethod = function patchedLeafletMapRuntimeRegistration(...args) {
+				recordLeafletMap(this, `prototype:${methodName}`);
+				return originalMethod.apply(this, args);
+			};
+			wrappedMethod.__emcdynmapplusWrapped = true;
+			globalThis.L.Map.prototype[methodName] = wrappedMethod;
+		}
+
+		debugInfo(`${pageMapPrefix}: patched Leaflet runtime map registration`);
 		return true;
 	}
 
@@ -359,8 +600,11 @@ function createMarkerEnginePageMap({
 		const poll = () => {
 			attempts += 1;
 			const mapPatched = patchLeafletMapCreation();
+			const mapRuntimeRegistrationPatched = patchLeafletMapRuntimeRegistration();
 			const layerControlPatched = patchLeafletLayerControls();
-			if (mapPatched && layerControlPatched) {
+			const zoomBoundsPatched = patchLeafletZoomBounds();
+			const gridLayerPatched = patchLeafletGridLayerUnderzoom();
+			if (mapPatched && mapRuntimeRegistrationPatched && layerControlPatched && zoomBoundsPatched && gridLayerPatched) {
 				tryScanWindowForLeafletMaps();
 				debugInfo(`${pageMapPrefix}: diagnostics ready`, {
 					attempts,
@@ -399,6 +643,14 @@ function createMarkerEnginePageMap({
 		appendDynmapPlusManagedLayer,
 		removeExistingDynmapPlusLayerRegistration,
 		normalizeDynmapPlusLayerRegistrations,
+		normalizeSyntheticUnderzoomConfig,
+		isLeafletGridLayerCandidate,
+		getLayerNativeMinZoom,
+		applySyntheticUnderzoomToLayer,
+		applySyntheticUnderzoomToMap,
+		patchLeafletZoomBounds,
+		patchLeafletGridLayerUnderzoom,
+		patchLeafletMapRuntimeRegistration,
 		patchLeafletMapCreation,
 		tryScanWindowForLeafletMaps,
 		patchLeafletLayerControls,
