@@ -127,16 +127,25 @@
 		}
 
 		function syncDynmapPlusLayerOptions(layersList, optionsMenu) {
+			removeStaleDynmapPlusLayerDuplicates(layersList, optionsMenu);
+
 			const insertBefore = optionsMenu.querySelector(".emcdynmapplus-layer-option");
 			const layerLabels = Array.from(layersList.querySelectorAll("label")).filter(
 				(label) => isDynmapPlusLeafletLayerLabel(label, optionsMenu),
 			);
 
 			for (const label of layerLabels) {
+				const input = label.querySelector("input.leaflet-control-layers-selector");
+				const layerId = getDynmapPlusLayerId(label, input);
+				removeOptionsMenuDynmapPlusLayerDuplicates(optionsMenu, layerId, label);
 				optionsMenu.insertBefore(label, insertBefore);
 			}
 
-			syncLinkedDynmapPlusLayerBindings(layerLabels);
+			syncLinkedDynmapPlusLayerBindings(
+				Array.from(optionsMenu.querySelectorAll("label")).filter((label) =>
+					isDynmapPlusLeafletLayerLabel(label, null, true),
+				),
+			);
 		}
 
 		function observeDynmapPlusLayerOptions(layersList, optionsMenu) {
@@ -153,9 +162,19 @@
 			});
 		}
 
-		function isDynmapPlusLeafletLayerLabel(label, optionsMenu) {
+		function isDynmapPlusLeafletLayerLabel(
+			label,
+			optionsMenu,
+			allowOptionsMenuChildren = false,
+		) {
 			if (!(label instanceof HTMLLabelElement)) return false;
-			if (label.closest("#options-menu") === optionsMenu) return false;
+			if (
+				!allowOptionsMenuChildren &&
+				optionsMenu &&
+				label.closest("#options-menu") === optionsMenu
+			) {
+				return false;
+			}
 			if (!label.querySelector("input.leaflet-control-layers-selector")) {
 				return false;
 			}
@@ -166,15 +185,58 @@
 			);
 		}
 
+		function getDynmapPlusLayerId(label, input) {
+			return (
+				input?.dataset?.emcdynmapplusLayerId ||
+				label?.dataset?.emcdynmapplusLayerId ||
+				""
+			);
+		}
+
+		function removeStaleDynmapPlusLayerDuplicates(layersList, optionsMenu) {
+			const nativeLabelsByLayerId = new Map();
+			for (const label of Array.from(layersList.querySelectorAll("label")).filter(
+				(label) => isDynmapPlusLeafletLayerLabel(label, optionsMenu),
+			)) {
+				const input = label.querySelector("input.leaflet-control-layers-selector");
+				const layerId = getDynmapPlusLayerId(label, input);
+				if (!layerId || nativeLabelsByLayerId.has(layerId)) continue;
+				nativeLabelsByLayerId.set(layerId, label);
+			}
+
+			for (const label of Array.from(optionsMenu.querySelectorAll("label")).filter(
+				(label) => isDynmapPlusLeafletLayerLabel(label, null, true),
+			)) {
+				const input = label.querySelector("input.leaflet-control-layers-selector");
+				const layerId = getDynmapPlusLayerId(label, input);
+				if (!layerId) continue;
+				if (!nativeLabelsByLayerId.has(layerId)) continue;
+				label.remove();
+			}
+		}
+
+		function removeOptionsMenuDynmapPlusLayerDuplicates(
+			optionsMenu,
+			layerId,
+			excludedLabel,
+		) {
+			if (!layerId) return;
+			for (const label of Array.from(optionsMenu.querySelectorAll("label")).filter(
+				(label) => isDynmapPlusLeafletLayerLabel(label, null, true),
+			)) {
+				const input = label.querySelector("input.leaflet-control-layers-selector");
+				if (getDynmapPlusLayerId(label, input) !== layerId) continue;
+				if (label === excludedLabel) continue;
+				label.remove();
+			}
+		}
+
 		function syncLinkedDynmapPlusLayerBindings(layerLabels) {
 			const inputsByLayerId = new Map();
 
 			for (const label of layerLabels) {
 				const input = label.querySelector("input.leaflet-control-layers-selector");
-				const layerId =
-					input?.dataset?.emcdynmapplusLayerId ||
-					label?.dataset?.emcdynmapplusLayerId ||
-					"";
+				const layerId = getDynmapPlusLayerId(label, input);
 				if (!(input instanceof HTMLElement) || !layerId) continue;
 				inputsByLayerId.set(layerId, input);
 			}

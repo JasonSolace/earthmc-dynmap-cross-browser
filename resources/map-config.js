@@ -45,7 +45,7 @@
 				borderResources: Object.freeze({
 					country: 'resources/borders.aurora.json',
 				}),
-				injectDynmapPlusChunksLayer: true,
+				injectDynmapPlusChunksLayer: false,
 				chunkBounds: Object.freeze({
 					L: -33280,
 					R: 33088,

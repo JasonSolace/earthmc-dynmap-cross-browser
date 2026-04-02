@@ -23,6 +23,7 @@ function loadMenu(options = {}) {
 			"formatMapModeLabel",
 			"addMainMenu",
 			"addOptions",
+			"syncDynmapPlusLayerOptions",
 			"resolveLinkedDynmapPlusLayerToggleChanges",
 			"parseZoomFromTileUrl",
 			"getPlanningPreviewScaleInfo",
@@ -239,8 +240,12 @@ test("menu options section rehomes Dynmap+ leaflet labels and preserves regular 
 	const dynmapLabel = document.createElement("label");
 	dynmapLabel.dataset.emcdynmapplusLayerOwner = "dynmapplus";
 	dynmapLabel.dataset.emcdynmapplusLayerSection = "dynmapplus";
+	dynmapLabel.dataset.emcdynmapplusLayerId = "countryBorders";
+	dynmapLabel.dataset.emcdynmapplusLayerName = "Country Borders";
 	const dynmapInput = document.createElement("input");
 	dynmapInput.className = "leaflet-control-layers-selector";
+	dynmapInput.dataset.emcdynmapplusLayerId = "countryBorders";
+	dynmapInput.dataset.emcdynmapplusLayerName = "Country Borders";
 	dynmapLabel.__queryMap.set("input.leaflet-control-layers-selector", dynmapInput);
 
 	const regularLabel = document.createElement("label");
@@ -258,6 +263,67 @@ test("menu options section rehomes Dynmap+ leaflet labels and preserves regular 
 	assert.ok(optionsMenu);
 	assert.equal(optionsMenu.children.includes(dynmapLabel), true);
 	assert.equal(optionsMenu.children.includes(regularLabel), false);
+});
+
+test("menu options section dedupes rehomed Dynmap+ leaflet labels by layer id", () => {
+	const { exports, document } = loadMenu({
+		extraGlobals: {
+			createElement(tagName, props = {}, children = []) {
+				const element = document.createElement(tagName);
+				if (props.id) element.id = props.id;
+				if (props.className) element.className = props.className;
+				if (props.text) element.textContent = props.text;
+				if (props.htmlFor) element.htmlFor = props.htmlFor;
+				if (props.type) element.type = props.type;
+				if (props.value != null) element.value = props.value;
+				if (props.attrs) {
+					for (const [name, value] of Object.entries(props.attrs)) {
+						element.setAttribute(name, value);
+					}
+				}
+				for (const child of children) {
+					if (child != null) element.appendChild(child);
+				}
+				return element;
+			},
+			addElement(parent, child) {
+				parent.appendChild(child);
+				return child;
+			},
+		},
+	});
+
+	const createDynmapLabel = () => {
+		const label = document.createElement("label");
+		label.dataset.emcdynmapplusLayerOwner = "dynmapplus";
+		label.dataset.emcdynmapplusLayerSection = "dynmapplus";
+		label.dataset.emcdynmapplusLayerId = "countryBorders";
+		label.dataset.emcdynmapplusLayerName = "Country Borders";
+		const input = document.createElement("input");
+		input.className = "leaflet-control-layers-selector";
+		input.dataset.emcdynmapplusLayerId = "countryBorders";
+		input.dataset.emcdynmapplusLayerName = "Country Borders";
+		label.__queryMap.set("input.leaflet-control-layers-selector", input);
+		return label;
+	};
+
+	const layersList = document.createElement("div");
+	const firstDynmapLabel = createDynmapLabel();
+	const duplicateDynmapLabel = createDynmapLabel();
+	layersList.__queryAllMap.set("label", [firstDynmapLabel, duplicateDynmapLabel]);
+	layersList.children = [firstDynmapLabel, duplicateDynmapLabel];
+
+	const section = exports.addOptions(layersList, "meganations");
+	const optionsMenu = section.children.find((child) => child.id === "options-menu");
+	optionsMenu.__queryAllMap.set("label", [firstDynmapLabel]);
+	exports.syncDynmapPlusLayerOptions(layersList, optionsMenu);
+
+	const borderLabels = optionsMenu.children.filter(
+		(child) => child.dataset?.emcdynmapplusLayerId === "countryBorders",
+	);
+	const uniqueBorderLabels = [...new Set(borderLabels)];
+
+	assert.equal(uniqueBorderLabels.length, 1);
 });
 
 test("menu keeps country and state border toggles mutually exclusive", () => {

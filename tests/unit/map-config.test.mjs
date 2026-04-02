@@ -61,7 +61,7 @@ test("map-config exposes active border and chunk settings per map", () => {
 		mapConfig.getBorderResourcePath("nostra", "state"),
 		"resources/borders.nostra.states-and-countries.json",
 	);
-	assert.equal(mapConfig.shouldInjectDynmapPlusChunksLayer("aurora"), true);
+	assert.equal(mapConfig.shouldInjectDynmapPlusChunksLayer("aurora"), false);
 	assert.equal(mapConfig.shouldInjectDynmapPlusChunksLayer("nostra"), false);
 	assert.deepEqual(normalize(mapConfig.getChunkBounds("nostra")), {
 		L: -64512,

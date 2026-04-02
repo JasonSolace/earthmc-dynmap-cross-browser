@@ -600,19 +600,19 @@ test("marker engine patches leaflet layer controls with dynmap metadata and dedu
 		_layers: [],
 		_container: context.document.createElement("div"),
 	};
-	const firstLayer = { options: { id: "chunks" } };
-	const secondLayer = { options: { id: "chunks" } };
+	const firstLayer = { options: { id: "countryBorders" } };
+	const secondLayer = { options: { id: "countryBorders" } };
 
-	context.L.Control.Layers.prototype._addLayer.call(control, firstLayer, "Chunks", true);
-	context.L.Control.Layers.prototype._addLayer.call(control, secondLayer, "Chunks", true);
+	context.L.Control.Layers.prototype._addLayer.call(control, firstLayer, "Country Borders", true);
+	context.L.Control.Layers.prototype._addLayer.call(control, secondLayer, "Country Borders", true);
 	assert.equal(control._layers.length, 1);
 
 	const label = context.L.Control.Layers.prototype._addItem.call(control, control._layers[0]);
 	assert.equal(label.dataset.emcdynmapplusLayerOwner, "dynmapplus");
-	assert.equal(label.dataset.emcdynmapplusLayerId, "chunks");
+	assert.equal(label.dataset.emcdynmapplusLayerId, "countryBorders");
 
 	const input = label.querySelector("input.leaflet-control-layers-selector");
-	assert.equal(input.dataset.emcdynmapplusLayerId, "chunks");
+	assert.equal(input.dataset.emcdynmapplusLayerId, "countryBorders");
 });
 
 test("marker engine reports planning projection signals from published attrs, tiles, and transforms", () => {

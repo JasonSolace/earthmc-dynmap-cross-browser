@@ -53,13 +53,6 @@ const getCurrentBorderResourcePaths = () =>
 		country: "resources/borders.aurora.json",
 	};
 const getCurrentMapType = () => EARTHMC_MAP?.getCurrentMapType?.() ?? "aurora";
-const getCurrentChunkBounds = () =>
-	EARTHMC_MAP?.getChunkBounds?.(getCurrentMapType()) ?? {
-		L: -33280, R: 33088,
-		U: -16640, D: 16512,
-	};
-const shouldInjectDynmapPlusChunksLayer = () =>
-	EARTHMC_MAP?.shouldInjectDynmapPlusChunksLayer?.(getCurrentMapType()) ?? true;
 const getCurrentOapiUrl = (resourcePath = "") =>
 	EARTHMC_MAP?.getMapApiUrl?.(OAPI_BASE, resourcePath)
 		?? `${OAPI_BASE}/aurora${resourcePath ? `/${String(resourcePath).replace(/^\/+/, "")}` : ""}`;
@@ -124,12 +117,6 @@ const LAST_LIVE_MAP_MODE_KEY = "emcdynmapplus-last-live-mapmode";
 const DYNMAP_PLUS_LAYER_OWNER = "dynmapplus";
 const DYNMAP_PLUS_LAYER_SECTION = "dynmapplus";
 const DYNMAP_PLUS_LAYER_DEFINITIONS = Object.freeze({
-	chunks: Object.freeze({
-		id: "chunks",
-		name: "Chunks",
-		owner: DYNMAP_PLUS_LAYER_OWNER,
-		section: DYNMAP_PLUS_LAYER_SECTION,
-	}),
 	countryBorders: Object.freeze({
 		id: "countryBorders",
 		name: "Country Borders",
@@ -464,22 +451,6 @@ async function getStyledBorders(resourcePath) {
 	return styledBorders;
 }
 
-function addChunksLayer(data) {
-	const { L, R, U, D } = getCurrentChunkBounds();
-	const ver = (x) => [{ x, z: U }, { x, z: D }, { x, z: U }];
-	const hor = (z) => [{ x: L, z }, { x: R, z }, { x: L, z }];
-
-	const chunkLines = [];
-	for (let x = L; x <= R; x += 16) chunkLines.push(ver(x));
-	for (let z = U; z <= D; z += 16) chunkLines.push(hor(z));
-
-	return appendDynmapPlusManagedLayer(data, DYNMAP_PLUS_LAYER_DEFINITIONS.chunks, {
-		hide: true,
-		control: true,
-		markers: [makePolyline(chunkLines, 0.33, "#000000")],
-	});
-}
-
 function addBorderLayer(data, definition, borders, failureLabel) {
 	try {
 		const points = Object.values(borders).flatMap((line) => borderEntryToPolylines(line));
@@ -531,9 +502,6 @@ async function modifyMarkersInPage(data) {
 	}
 
 	parsedMarkers = [];
-	if (shouldInjectDynmapPlusChunksLayer()) {
-		result = addChunksLayer(result);
-	}
 
 	const borderResources = getCurrentBorderResourcePaths();
 	const countryBorders = await getStyledBorders(borderResources.country);
