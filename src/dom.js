@@ -421,21 +421,44 @@ async function editUILayout() {
 		}
 	})
 
-	// move the +- zoom control buttons to the bottom instead of top
-    // and make sure the link and coordinates buttons align with it
 	const bottomLeft = document.querySelector(".leaflet-bottom.leaflet-left")
-	if (link || coordinates) {
-		const wrapper = document.createElement('div')
-		wrapper.id = 'coords-container'
+	if (bottomLeft instanceof HTMLElement && (link || coordinates)) {
+		let wrapper = document.querySelector('#coords-container')
+		if (!(wrapper instanceof HTMLElement)) {
+			wrapper = document.createElement('div')
+			wrapper.id = 'coords-container'
+			bottomLeft.appendChild(wrapper)
+		}
  		
-		// place link btn and coords in same div under bottom left panel
+		// Keep the camera tools grouped in the bottom-left panel.
 		if (link) wrapper.appendChild(link)
 		if (coordinates) wrapper.appendChild(coordinates)
-		bottomLeft.appendChild(wrapper)
 	}
 
 	const zoomControl = await waitForElement('.leaflet-control-zoom')
-	if (zoomControl) bottomLeft.insertBefore(zoomControl, bottomLeft.firstChild)
+	const topLeft = document.querySelector('.leaflet-top.leaflet-left')
+	if (zoomControl instanceof HTMLElement && topLeft instanceof HTMLElement) {
+		const siblings = Array.from(topLeft.children).filter(child => child instanceof HTMLElement && child !== zoomControl)
+		const layerToggle = siblings.find(child =>
+			child.classList.contains('leaflet-control-layers')
+			&& child.id !== 'sidebar'
+			&& !child.classList.contains('coordinates')
+			&& !child.classList.contains('link')
+		)
+		const sidebar = siblings.find(child => child.id === 'sidebar') ?? null
+		const reference = layerToggle ?? sidebar
+
+		if (reference instanceof HTMLElement) {
+			const referenceIndex = siblings.indexOf(reference)
+			const nextSibling = siblings[referenceIndex + 1] ?? null
+			if (nextSibling instanceof HTMLElement) topLeft.insertBefore(zoomControl, nextSibling)
+			else topLeft.appendChild(zoomControl)
+		} else if (topLeft.firstChild instanceof HTMLElement) {
+			topLeft.insertBefore(zoomControl, topLeft.firstChild)
+		} else {
+			topLeft.appendChild(zoomControl)
+		}
+	}
 
     // Fix nameplates appearing over popups
     waitForElement('.leaflet-nameplate-pane').then(el => el.style = '')
