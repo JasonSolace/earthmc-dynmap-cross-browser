@@ -54,6 +54,12 @@ That file is `dist/firefox/manifest.json`.
 
 Firefox temporary add-ons are removed when Firefox fully restarts. That is normal during local development and manual testing.
 
+### I see thin line artifacts at maximum zoom
+
+On some Chromium and Firefox setups, disabling browser hardware acceleration can cause visible seam or line artifacts when the map is zoomed all the way in.
+
+The extension can still run without hardware acceleration, but maximum-zoom rendering is most reliable with hardware acceleration enabled in the browser.
+
 ### Archive mode is unavailable or inconsistent
 
 Archive mode depends on historical marker snapshots and a compatibility relay. Normal live map browsing does not depend on that path.
