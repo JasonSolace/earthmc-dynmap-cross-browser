@@ -242,16 +242,9 @@ select {
 }
 
 .sidebar-header {
-	display: grid;
-	gap: 8px;
-}
-
-.sidebar-eyebrow {
-	font-size: 10px;
-	font-weight: 800;
-	letter-spacing: 0.18em;
-	text-transform: uppercase;
-	color: var(--accent-strong);
+	display: flex;
+	align-items: flex-start;
+	justify-content: flex-start;
 }
 
 .sidebar-title,
@@ -282,7 +275,7 @@ select {
 .sidebar-status-row {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
+	justify-content: flex-start;
 	gap: 10px;
 	flex-wrap: wrap;
 }
@@ -290,14 +283,16 @@ select {
 #current-map-mode-label {
 	display: inline-flex;
 	align-items: center;
-	padding: 6px 10px;
-	border-radius: 999px;
-	background: linear-gradient(135deg, var(--accent-soft), rgba(255, 255, 255, 0.06));
-	border: 1px solid rgba(255, 255, 255, 0.1);
+	padding: 10px 12px;
+	border-radius: var(--radius-sm);
+	background: var(--panel-muted-bg) !important;
+	border: 1px solid var(--panel-border) !important;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 	font-size: 11px;
-	font-weight: 800;
-	letter-spacing: 0.06em;
-	text-transform: uppercase;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	color: var(--text-strong) !important;
+	width: fit-content;
 }
 
 .sidebar-mode-hint {

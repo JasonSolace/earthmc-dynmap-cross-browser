@@ -399,9 +399,26 @@ test("menu shell builds the floating sidebar with the expected live mode label",
 		return null;
 	}
 
+	function findByClass(node, className) {
+		if (!node || typeof node !== "object") return null;
+		if (
+			typeof node.className === "string" &&
+			node.className.split(/\s+/).includes(className)
+		) {
+			return node;
+		}
+		for (const child of node.children || []) {
+			const result = findByClass(child, className);
+			if (result) return result;
+		}
+		return null;
+	}
+
 	const modeLabel = findById(sidebar, "current-map-mode-label");
 	assert.ok(sidebar);
 	assert.equal(sidebar.id, "sidebar");
 	assert.ok(modeLabel);
 	assert.equal(modeLabel.textContent, "View: Mega Nations");
+	assert.equal(findByClass(sidebar, "sidebar-eyebrow"), null);
+	assert.equal(findByClass(sidebar, "sidebar-title"), null);
 });

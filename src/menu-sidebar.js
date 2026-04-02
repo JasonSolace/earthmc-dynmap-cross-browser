@@ -129,20 +129,6 @@
 				sidebar,
 				createElement("div", { className: "sidebar-header" }),
 			);
-			addElement(
-				header,
-				createElement("div", {
-					className: "sidebar-eyebrow",
-					text: "EarthMC Dynmap+",
-				}),
-			);
-			addElement(
-				header,
-				createElement("h2", {
-					className: "sidebar-title",
-					text: "Map Toolkit",
-				}),
-			);
 
 			const status = addElement(
 				header,
