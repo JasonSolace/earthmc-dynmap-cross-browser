@@ -9,6 +9,8 @@
 	const PLANNING_UI_PREFIX = "emcdynmapplus[planning-ui]";
 	const PLANNING_PLACE_EVENT = "EMCDYNMAPPLUS_PLACE_PLANNING_NATION";
 	const PLANNING_LIVE_READY_ATTR = "data-emcdynmapplus-planning-live-ready";
+	const PLANNING_NATIVE_PLACEMENT_READY_ATTR =
+		"data-emcdynmapplus-planning-native-placement-ready";
 
 	let planningPlacementClickInitialized = false;
 
@@ -268,6 +270,18 @@
 		return nation;
 	}
 
+	function parsePlanningPlacementEventDetail(detail) {
+		if (typeof detail === "string") {
+			try {
+				return JSON.parse(detail);
+			} catch {
+				return null;
+			}
+		}
+
+		return detail && typeof detail === "object" ? detail : null;
+	}
+
 	function placeHardcodedPlanningNation(center, source = "unknown") {
 		const nation = storePlanningNation(center, source);
 		if (!usePlanningLiveUpdates()) reloadPlanningMapAt(nation.center);
@@ -326,6 +340,17 @@
 		if (!(target instanceof HTMLElement)) return;
 		if (!target.closest(".leaflet-container")) return;
 		if (target.closest(".leaflet-control-container")) return;
+		if (
+			document.documentElement?.getAttribute?.(
+				PLANNING_NATIVE_PLACEMENT_READY_ATTR,
+			) === "true"
+		) {
+			setPlanningDebugState("ignored text placement click in favor of native placement bridge", {
+				targetTag: target.tagName,
+				targetClassName: target.className || null,
+			});
+			return;
+		}
 
 		const rawCoordinatesText = getPlanningCoordsText();
 		const coords = parsePlanningCoords(rawCoordinatesText);
@@ -339,10 +364,11 @@
 	}
 
 	function handlePlanningPlacementEvent(event) {
-		const center = event.detail?.center ?? null;
+		const detail = parsePlanningPlacementEventDetail(event.detail);
+		const center = detail?.center ?? null;
 		const source =
-			typeof event.detail?.source === "string"
-				? event.detail.source
+			typeof detail?.source === "string"
+				? detail.source
 				: "custom-event";
 		setPlanningDebugState("received planning placement event", {
 			source,

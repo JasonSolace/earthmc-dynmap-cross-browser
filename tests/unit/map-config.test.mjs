@@ -69,6 +69,16 @@ test("map-config exposes active border and chunk settings per map", () => {
 		U: -32256,
 		D: 32256,
 	});
+	assert.deepEqual(normalize(mapConfig.getPlanningLeafletProjection("aurora")), {
+		xScale: 8,
+		zScale: -8,
+		zOffset: -4,
+	});
+	assert.deepEqual(normalize(mapConfig.getPlanningLeafletProjection("nostra")), {
+		xScale: 32,
+		zScale: -32,
+		zOffset: -16,
+	});
 });
 
 test("map-config preserves archive URL cutovers and nation bonus tiers", () => {

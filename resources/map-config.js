@@ -52,6 +52,11 @@
 					U: -16640,
 					D: 16512,
 				}),
+				planningLeafletProjection: Object.freeze({
+					xScale: 8,
+					zScale: -8,
+					zOffset: -4,
+				}),
 				nationBonusTiers: LEGACY_AURORA_NATION_BONUS_TIERS,
 			}),
 			nostra: Object.freeze({
@@ -69,6 +74,11 @@
 					R: 64512,
 					U: -32256,
 					D: 32256,
+				}),
+				planningLeafletProjection: Object.freeze({
+					xScale: 32,
+					zScale: -32,
+					zOffset: -16,
 				}),
 				nationBonusTiers: LEGACY_AURORA_NATION_BONUS_TIERS,
 			}),
@@ -101,6 +111,9 @@
 
 	const getChunkBounds = (mapType = getCurrentMapType()) =>
 		getMapConfig(mapType).chunkBounds
+
+	const getPlanningLeafletProjection = (mapType = getCurrentMapType()) =>
+		getMapConfig(mapType).planningLeafletProjection
 
 	const shouldInjectDynmapPlusChunksLayer = (mapType = getCurrentMapType()) =>
 		getMapConfig(mapType).injectDynmapPlusChunksLayer !== false
@@ -139,6 +152,7 @@
 		getBorderResourcePaths,
 		getBorderResourcePath,
 		getChunkBounds,
+		getPlanningLeafletProjection,
 		shouldInjectDynmapPlusChunksLayer,
 		getMapApiUrl,
 		getNationClaimBonus,

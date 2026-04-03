@@ -2,15 +2,56 @@
 const PLANNING_LEAFLET_ADAPTER_KEY = "__EMCDYNMAPPLUS_PLANNING_LEAFLET_ADAPTER__";
 if (globalThis[PLANNING_LEAFLET_ADAPTER_KEY]) return;
 
+const DEFAULT_PROJECTION_MODEL = Object.freeze({
+	xScale: 8,
+	zScale: -8,
+	zOffset: -4,
+});
+
+function resolveProjectionModel({
+	mapType = null,
+	projectionModel = null,
+	getCurrentMapType = () => globalThis.EMCDYNMAPPLUS_MAP?.getCurrentMapType?.() ?? null,
+	getPlanningLeafletProjection = (nextMapType) =>
+		globalThis.EMCDYNMAPPLUS_MAP?.getPlanningLeafletProjection?.(nextMapType) ?? null,
+	getMapConfig = (nextMapType) => globalThis.EMCDYNMAPPLUS_MAP?.getMapConfig?.(nextMapType) ?? null,
+} = {}) {
+	const currentMapType = mapType || getCurrentMapType?.() || null;
+	const mapProjectionModel =
+		projectionModel
+		?? getPlanningLeafletProjection?.(currentMapType)
+		?? getMapConfig?.(currentMapType)?.planningLeafletProjection
+		?? DEFAULT_PROJECTION_MODEL;
+	const xScale = Number(mapProjectionModel?.xScale);
+	const zScale = Number(mapProjectionModel?.zScale);
+	const zOffset = Number(mapProjectionModel?.zOffset);
+	if (!Number.isFinite(xScale) || !Number.isFinite(zScale) || !Number.isFinite(zOffset)) {
+		return DEFAULT_PROJECTION_MODEL;
+	}
+
+	return Object.freeze({ xScale, zScale, zOffset });
+}
+
 function createPlanningLeafletAdapter({
-	xScale = 8,
-	zScale = -8,
-	zOffset = -4,
+	mapType = null,
+	projectionModel = null,
+	getCurrentMapType = () => globalThis.EMCDYNMAPPLUS_MAP?.getCurrentMapType?.() ?? null,
+	getPlanningLeafletProjection = (nextMapType) =>
+		globalThis.EMCDYNMAPPLUS_MAP?.getPlanningLeafletProjection?.(nextMapType) ?? null,
+	getMapConfig = (nextMapType) => globalThis.EMCDYNMAPPLUS_MAP?.getMapConfig?.(nextMapType) ?? null,
 	latLngFactory = (lat, lng) =>
 		typeof globalThis.L?.latLng === "function"
 			? globalThis.L.latLng(lat, lng)
 			: { lat, lng },
 } = {}) {
+	const { xScale, zScale, zOffset } = resolveProjectionModel({
+		mapType,
+		projectionModel,
+		getCurrentMapType,
+		getPlanningLeafletProjection,
+		getMapConfig,
+	});
+
 	function getModel() {
 		return {
 			xScale,

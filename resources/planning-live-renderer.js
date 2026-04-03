@@ -951,6 +951,10 @@ function createPlanningLiveRenderer({
 		}
 	}
 
+	function hasAttachedMapListeners() {
+		return !!(attachedMap && listenerStats.attachCount > 0);
+	}
+
 	function getProjectionSamplingStability(map = null, mapContainer = null) {
 		const container = mapContainer instanceof HTMLElement ? mapContainer : null;
 		const className = container?.className || "";
@@ -1219,7 +1223,9 @@ function createPlanningLiveRenderer({
 						zoomAttr: nextZoomAttr,
 					});
 					ensureMapListeners();
-					scheduleZoomResync("root-zoom-attr", [0, 80]);
+					if (!hasAttachedMapListeners()) {
+						scheduleZoomResync("root-zoom-attr", [0, 80]);
+					}
 					break;
 				}
 			}

@@ -7,6 +7,9 @@ function createMarkerEnginePlanning({
 	planningLayerPrefix = "emcdynmapplus[planning-layer]",
 	defaultPlanningRange = 5000,
 	planningCenterRadius = 48,
+	planningPlacementArmedKey = "emcdynmapplus-planning-placement-armed",
+	planningPlaceEvent = "EMCDYNMAPPLUS_PLACE_PLANNING_NATION",
+	planningNativePlacementReadyAttr = "data-emcdynmapplus-planning-native-placement-ready",
 	pageMapZoomAttr = "data-emcdynmapplus-leaflet-zoom",
 	pageMapContainerAttr = "data-emcdynmapplus-leaflet-map-container",
 	pageTileZoomAttr = "data-emcdynmapplus-tile-zoom",
@@ -68,7 +71,13 @@ function createMarkerEnginePlanning({
 		pageTileSummaryAttr,
 		locationHref: () => globalThis.location.href,
 	});
-	const planningLeafletAdapter = planningLeafletAdapterFactory();
+	const currentMapType = globalThis.EMCDYNMAPPLUS_MAP?.getCurrentMapType?.() ?? "aurora";
+	const planningLeafletProjection =
+		globalThis.EMCDYNMAPPLUS_MAP?.getPlanningLeafletProjection?.(currentMapType) ?? null;
+	const planningLeafletAdapter = planningLeafletAdapterFactory({
+		mapType: currentMapType,
+		projectionModel: planningLeafletProjection,
+	});
 	planningRuntime.init();
 	globalThis.EMCDYNMAPPLUS_PAGE_PLANNING_RUNTIME = planningRuntime;
 	const planningLiveRenderer = planningLiveRendererFactory({
@@ -83,6 +92,115 @@ function createMarkerEnginePlanning({
 	});
 	planningLiveRenderer.init();
 	globalThis.EMCDYNMAPPLUS_PAGE_PLANNING_LIVE_RENDERER = planningLiveRenderer;
+	initPlanningNativePlacementBridge();
+
+	function setPlanningNativePlacementReady(ready) {
+		const root = document.documentElement;
+		if (!(root instanceof HTMLElement)) return;
+		if (ready) root.setAttribute(planningNativePlacementReadyAttr, "true");
+		else root.removeAttribute(planningNativePlacementReadyAttr);
+	}
+
+	function isPlanningPlacementArmed() {
+		try {
+			return globalThis.localStorage?.[planningPlacementArmedKey] === "true";
+		} catch {
+			return false;
+		}
+	}
+
+	function canUseNativePlanningPlacement() {
+		const map = getPrimaryLeafletMap();
+		return !!(
+			map
+			&& planningLeafletAdapter.canProjectWithMap?.(map)
+			&& typeof map.containerPointToLatLng === "function"
+		);
+	}
+
+	function dispatchNativePlanningPlacement(center, source = "native-map-click") {
+		if (!center) return false;
+		try {
+			document.dispatchEvent(
+				new CustomEvent(planningPlaceEvent, {
+					detail: JSON.stringify({
+						source,
+						center,
+					}),
+				}),
+			);
+			return true;
+		} catch (err) {
+			debugInfo(`${planningLayerPrefix}: failed to dispatch native planning placement`, {
+				error: String(err),
+				center,
+				source,
+			});
+			return false;
+		}
+	}
+
+	function initPlanningNativePlacementBridge() {
+		let listenerAttached = false;
+		let pollTimer = 0;
+
+		const updateReadyState = () => {
+			const ready = canUseNativePlanningPlacement();
+			setPlanningNativePlacementReady(ready);
+			if (ready) return true;
+
+			pollTimer = globalThis.setTimeout(updateReadyState, 250);
+			return false;
+		};
+
+		const handleNativePlacementClick = (event) => {
+			if (!isPlanningModeActive()) return;
+			if (!isPlanningPlacementArmed()) return;
+
+			const target = event.target;
+			if (!(target instanceof HTMLElement)) return;
+			if (!target.closest(".leaflet-container")) return;
+			if (target.closest(".leaflet-control-container")) return;
+
+			const map = getPrimaryLeafletMap();
+			if (!canUseNativePlanningPlacement()) {
+				setPlanningNativePlacementReady(false);
+				updateReadyState();
+				return;
+			}
+
+			const container = map.getContainer?.();
+			if (!(container instanceof HTMLElement)) return;
+			const rect = container.getBoundingClientRect();
+			const containerPoint = {
+				x: event.clientX - rect.left,
+				y: event.clientY - rect.top,
+			};
+
+			let latLng = null;
+			try {
+				latLng = map.containerPointToLatLng?.(containerPoint) ?? null;
+			} catch {
+				latLng = null;
+			}
+			if (!latLng) return;
+
+			const center = planningLeafletAdapter.latLngToWorld?.(latLng, {
+				round: true,
+			});
+			if (!center) return;
+
+			dispatchNativePlanningPlacement(center);
+		};
+
+		if (!listenerAttached) {
+			document.addEventListener("click", handleNativePlacementClick, true);
+			listenerAttached = true;
+		}
+
+		if (pollTimer) globalThis.clearTimeout(pollTimer);
+		updateReadyState();
+	}
 
 	function loadPlanningNations() {
 		const planningNations = planningRuntime.getPlanningNations();
