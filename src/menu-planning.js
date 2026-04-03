@@ -8,6 +8,7 @@
 	const PLANNING_DEBUG_STATE_KEY = "emcdynmapplus-planning-debug-state";
 	const PLANNING_UI_PREFIX = "emcdynmapplus[planning-ui]";
 	const PLANNING_PLACE_EVENT = "EMCDYNMAPPLUS_PLACE_PLANNING_NATION";
+	const PLANNING_LIVE_READY_ATTR = "data-emcdynmapplus-planning-live-ready";
 
 	let planningPlacementClickInitialized = false;
 
@@ -56,12 +57,21 @@
 		setPlanningDefaultRange: savePlanningDefaultRange,
 		normalizePlanningNation,
 	} = planningState;
+	const PLANNING_STATE_UPDATED_EVENT =
+		planningRuntimeHelpers.PLANNING_STATE_UPDATED_EVENT;
 
 	function notifyPlanningStateUpdated(source, detail = {}) {
 		planningRuntimeHelpers.dispatchPlanningStateUpdated({
 			source,
 			...detail,
 		});
+	}
+
+	function usePlanningLiveUpdates() {
+		return (
+			document.documentElement?.getAttribute?.(PLANNING_LIVE_READY_ATTR) ===
+			"true"
+		);
 	}
 
 	function setPlanningDebugState(action, details = {}) {
@@ -188,7 +198,7 @@
 			rangeRadiusBlocks: normalizedRange,
 			trigger: source,
 		});
-		reloadPlanningMapAt(activeNation.center);
+		if (!usePlanningLiveUpdates()) reloadPlanningMapAt(activeNation.center);
 		return true;
 	}
 
@@ -234,9 +244,11 @@
 		notifyPlanningStateUpdated("planning-nations-cleared", {
 			center: activeNation?.center ?? null,
 		});
-		reloadPlanningMapAt(
-			activeNation?.center ?? parsePlanningCoords(getPlanningCoordsText()),
-		);
+		if (!usePlanningLiveUpdates()) {
+			reloadPlanningMapAt(
+				activeNation?.center ?? parsePlanningCoords(getPlanningCoordsText()),
+			);
+		}
 	}
 
 	function storePlanningNation(center, source = "unknown") {
@@ -258,7 +270,7 @@
 
 	function placeHardcodedPlanningNation(center, source = "unknown") {
 		const nation = storePlanningNation(center, source);
-		reloadPlanningMapAt(nation.center);
+		if (!usePlanningLiveUpdates()) reloadPlanningMapAt(nation.center);
 	}
 
 	function handlePlanningPlacementRequest(center, source = "unknown") {
@@ -537,6 +549,9 @@
 			armPlanningPlacement();
 			syncPlanningSectionState();
 		});
+		document.addEventListener(PLANNING_STATE_UPDATED_EVENT, () =>
+			syncPlanningSectionState(),
+		);
 		syncPlanningSectionState();
 
 		return section;

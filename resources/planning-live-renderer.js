@@ -1,0 +1,1585 @@
+(() => {
+const PLANNING_LIVE_RENDERER_KEY = "__EMCDYNMAPPLUS_PLANNING_LIVE_RENDERER__";
+if (globalThis[PLANNING_LIVE_RENDERER_KEY]) return;
+
+const PLANNING_LIVE_READY_ATTR = "data-emcdynmapplus-planning-live-ready";
+const PLANNING_LIVE_OVERLAY_ID = "emcdynmapplus-planning-live-overlay";
+const DEFAULT_COORDS_SELECTOR = ".leaflet-control-layers.coordinates";
+const PLANNING_STATE_UPDATED_EVENT = "EMCDYNMAPPLUS_PLANNING_STATE_UPDATED";
+const DEFAULT_PAGE_MAP_ZOOM_ATTR = "data-emcdynmapplus-leaflet-zoom";
+const PLANNING_LIVE_DEBUG_STORAGE_KEY = "emcdynmapplus-planning-live-debug";
+const PLANNING_LIVE_DEBUG_MODE_STORAGE_KEY = "emcdynmapplus-planning-live-debug-mode";
+const GLOBAL_DEBUG_STORAGE_KEY = "emcdynmapplus-debug";
+const MAX_DEBUG_EVENTS = 200;
+
+function createPlanningLiveRenderer({
+	planningLayerPrefix = "emcdynmapplus[planning-layer]",
+	liveReadyAttr = PLANNING_LIVE_READY_ATTR,
+	liveOverlayId = PLANNING_LIVE_OVERLAY_ID,
+	coordsSelector = DEFAULT_COORDS_SELECTOR,
+	pageMapZoomAttr = DEFAULT_PAGE_MAP_ZOOM_ATTR,
+	planningCenterRadius = 48,
+	createPlanningCircleVertices,
+	planningLeafletAdapter = null,
+	getPlanningNations = () => [],
+	getPrimaryLeafletMap = () => null,
+	isPlanningModeActive = () => true,
+	debugInfo = () => {},
+	sampleWorldPoint = null,
+} = {}) {
+	if (typeof createPlanningCircleVertices !== "function") {
+		throw new Error("planning live renderer requires createPlanningCircleVertices");
+	}
+
+	let renderFrame = 0;
+	let panCaptureFrame = 0;
+	let attachedMap = null;
+	let listenersAttached = false;
+	let rootObserver = null;
+	let debugSequence = 0;
+	let debugEvents = [];
+	let lastRenderTrigger = "init";
+	let lastPanSnapshot = null;
+	let lastInteractionDefer = null;
+	let listenerStats = {
+		attachedAt: null,
+		attachCount: 0,
+		attachedMapDescriptor: null,
+		zoomstart: 0,
+		zoomanim: 0,
+		zoom: 0,
+		zoomend: 0,
+		movestart: 0,
+		move: 0,
+		moveend: 0,
+	};
+	let panCaptureActive = false;
+	let panCaptureSampleCount = 0;
+	let lastObservedRootZoomAttr = null;
+	let lastStableRenderZoom = null;
+	let zoomAnimationState = null;
+	const delayedRenderTimers = new Set();
+	let lastRenderState = {
+		ok: false,
+		reason: "uninitialized",
+		projectionMode: null,
+		nations: [],
+	};
+	let pollTimer = 0;
+
+	function setLiveReady(ready) {
+		const root = document.documentElement;
+		if (!(root instanceof HTMLElement)) return;
+
+		if (ready) root.setAttribute(liveReadyAttr, "true");
+		else root.removeAttribute(liveReadyAttr);
+	}
+
+	function isLiveReady() {
+		return document.documentElement?.getAttribute?.(liveReadyAttr) === "true";
+	}
+
+	function canUseStorage() {
+		try {
+			return !!globalThis.localStorage;
+		} catch {
+			return false;
+		}
+	}
+
+	function isDebugEnabled() {
+		return getDebugMode() !== "off";
+	}
+
+	function normalizeDebugMode(mode) {
+		if (mode === "pan" || mode === "all") return mode;
+		return "off";
+	}
+
+	function getStoredDebugMode() {
+		if (!canUseStorage()) return "off";
+		try {
+			const explicitMode = normalizeDebugMode(
+				localStorage[PLANNING_LIVE_DEBUG_MODE_STORAGE_KEY],
+			);
+			if (explicitMode !== "off") return explicitMode;
+			if (localStorage[PLANNING_LIVE_DEBUG_STORAGE_KEY] === "true") return "all";
+			if (localStorage[GLOBAL_DEBUG_STORAGE_KEY] === "true") return "all";
+			return "off";
+		} catch {
+			return "off";
+		}
+	}
+
+	function setDebugEnabled(enabled) {
+		return setDebugMode(enabled ? "all" : "off");
+	}
+
+	function getDebugMode() {
+		return getStoredDebugMode();
+	}
+
+	function setDebugMode(mode) {
+		const nextMode = normalizeDebugMode(mode);
+		if (!canUseStorage()) return false;
+		try {
+			if (nextMode === "off") {
+				localStorage[PLANNING_LIVE_DEBUG_STORAGE_KEY] = "false";
+				delete localStorage[PLANNING_LIVE_DEBUG_MODE_STORAGE_KEY];
+			} else {
+				localStorage[PLANNING_LIVE_DEBUG_STORAGE_KEY] = "true";
+				localStorage[PLANNING_LIVE_DEBUG_MODE_STORAGE_KEY] = nextMode;
+			}
+			recordDebug("debug-toggle", {
+				enabled: nextMode !== "off",
+				mode: nextMode,
+			});
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	function clearDebugEvents() {
+		debugEvents = [];
+		debugSequence = 0;
+	}
+
+	function safeNumber(value, digits = 3) {
+		const numeric = Number(value);
+		if (!Number.isFinite(numeric)) return null;
+		return Number(numeric.toFixed(digits));
+	}
+
+	function summarizeRect(rect) {
+		if (!rect) return null;
+		return {
+			left: safeNumber(rect.left, 2),
+			top: safeNumber(rect.top, 2),
+			right: safeNumber(rect.right, 2),
+			bottom: safeNumber(rect.bottom, 2),
+			width: safeNumber(rect.width, 2),
+			height: safeNumber(rect.height, 2),
+		};
+	}
+
+	function summarizeMap(map = null) {
+		if (!map || typeof map !== "object") return null;
+		const container = map.getContainer?.();
+		const center = map.getCenter?.();
+		const size = map.getSize?.();
+		return {
+			hasMap: true,
+			zoom: safeNumber(map.getZoom?.(), 3),
+			center: center
+				? {
+					lat: safeNumber(center.lat, 5),
+					lng: safeNumber(center.lng, 5),
+				}
+				: null,
+			size: size
+				? {
+					x: safeNumber(size.x, 2),
+					y: safeNumber(size.y, 2),
+				}
+				: null,
+			containerClassName: container?.className || null,
+			hasContainerPointToLayerPoint: typeof map.containerPointToLayerPoint === "function",
+			hasContainerPointToLatLng: typeof map.containerPointToLatLng === "function",
+			hasLatLngToLayerPoint: typeof map.latLngToLayerPoint === "function",
+			hasOverlayPane: !!map.getPane?.("overlayPane"),
+		};
+	}
+
+	function summarizeElementBox(element) {
+		if (!(element instanceof Element)) return null;
+		const computedStyle = getComputedStyle?.(element) ?? null;
+		return {
+			tagName: element.tagName || null,
+			id: element.id || null,
+			className: typeof element.className === "string" ? element.className : null,
+			hidden: element.hidden === true,
+			styleLeft: element.style?.left || null,
+			styleTop: element.style?.top || null,
+			styleWidth: element.style?.width || null,
+			styleHeight: element.style?.height || null,
+			attrWidth: element.getAttribute?.("width") || null,
+			attrHeight: element.getAttribute?.("height") || null,
+			viewBox: element.getAttribute?.("viewBox") || null,
+			transform: computedStyle?.transform || null,
+			transformOrigin: computedStyle?.transformOrigin || null,
+			willChange: computedStyle?.willChange || null,
+			rect: summarizeRect(element.getBoundingClientRect?.()),
+		};
+	}
+
+	function describeAttachedMap(map = null) {
+		if (!map || typeof map !== "object") return null;
+		const container = map.getContainer?.();
+		return {
+			zoom: safeNumber(map.getZoom?.(), 3),
+			containerId: container?.id || null,
+			containerClassName: container?.className || null,
+			hasOn: typeof map.on === "function",
+			hasLatLngToLayerPoint: typeof map.latLngToLayerPoint === "function",
+			hasContainerPointToLatLng: typeof map.containerPointToLatLng === "function",
+		};
+	}
+
+	function readEffectiveZoom(map = null) {
+		const mapZoom = Number(map?.getZoom?.());
+		if (Number.isFinite(mapZoom)) return mapZoom;
+
+		const rootZoomRaw = document.documentElement?.getAttribute?.(pageMapZoomAttr);
+		const rootZoom = Number(rootZoomRaw);
+		return Number.isFinite(rootZoom) ? rootZoom : null;
+	}
+
+	function recordDebug(type, details = {}) {
+		const mode = getDebugMode();
+		if (mode === "off") return null;
+		if (!shouldRecordDebug(type, details, mode)) return null;
+
+		const entry = {
+			seq: ++debugSequence,
+			at: Date.now(),
+			type,
+			details,
+		};
+		debugEvents.push(entry);
+		if (debugEvents.length > MAX_DEBUG_EVENTS) {
+			debugEvents = debugEvents.slice(-MAX_DEBUG_EVENTS);
+		}
+
+		try {
+			console.info(`${planningLayerPrefix}:live-debug:${type}`, details);
+		} catch {}
+		return entry;
+	}
+
+	function shouldRecordDebug(type, details = {}, mode = getDebugMode()) {
+		if (mode === "all") return true;
+		if (mode !== "pan") return false;
+
+		if (type === "debug-toggle") return true;
+		if (type === "pan-event") return true;
+		if (type === "pan-frame") return true;
+		if (type === "pan-capture-start") return true;
+		if (type === "pan-capture-stop") return true;
+		if (type === "render-failed") return true;
+		if (type === "pan-trace-export") return true;
+		if (type === "pan-capture") return true;
+		if (type === "interaction-defer") return true;
+		if (type === "listener-attach") return true;
+		if (type === "listener-attach-skip") return true;
+		if (type === "listener-event") return true;
+
+		if (type === "render-complete" || type === "render-start") {
+			const trigger = String(details?.trigger ?? "");
+			return trigger.includes("map-event") || trigger.includes("move") || trigger.includes("window-resize");
+		}
+
+		return false;
+	}
+
+	function getMapPane(mapContainer = null) {
+		if (!(mapContainer instanceof HTMLElement)) return null;
+		const pane = mapContainer.querySelector?.(".leaflet-map-pane");
+		return pane instanceof HTMLElement ? pane : null;
+	}
+
+	function getTilePane(mapContainer = null) {
+		if (!(mapContainer instanceof HTMLElement)) return null;
+		const pane = mapContainer.querySelector?.(".leaflet-tile-pane");
+		return pane instanceof HTMLElement ? pane : null;
+	}
+
+	function getMarkerPane(mapContainer = null) {
+		if (!(mapContainer instanceof HTMLElement)) return null;
+		const pane = mapContainer.querySelector?.(".leaflet-marker-pane");
+		return pane instanceof HTMLElement ? pane : null;
+	}
+
+	function getOverlayElement(mapContainer = null) {
+		const overlay = document.getElementById?.(liveOverlayId)
+			|| mapContainer?.querySelector?.(`#${liveOverlayId}`)
+			|| null;
+		return overlay instanceof Element ? overlay : null;
+	}
+
+	function getPanDiagnostics(label = "snapshot", { record = true } = {}) {
+		const map = getPrimaryLeafletMap();
+		const mapContainer = getMapContainer();
+		const overlayHost = getOverlayHost(mapContainer);
+		const overlay = getOverlayElement(mapContainer);
+		const mapPane = getMapPane(mapContainer);
+		const tilePane = getTilePane(mapContainer);
+		const markerPane = getMarkerPane(mapContainer);
+		const rootZoomAttr = document.documentElement?.getAttribute?.(pageMapZoomAttr) ?? null;
+
+		const snapshot = {
+			label,
+			at: Date.now(),
+			liveReady: isLiveReady(),
+			rootZoomAttr,
+			map: summarizeMap(map),
+			mapContainer: summarizeElementBox(mapContainer),
+			mapPane: summarizeElementBox(mapPane),
+			tilePane: summarizeElementBox(tilePane),
+			overlayHost: summarizeElementBox(overlayHost),
+			markerPane: summarizeElementBox(markerPane),
+			overlay: summarizeElementBox(overlay),
+			lastRenderTrigger,
+			lastRenderState: {
+				ok: lastRenderState.ok,
+				reason: lastRenderState.reason ?? null,
+				projectionMode: lastRenderState.projectionMode ?? null,
+				nationCount: Array.isArray(lastRenderState.nations) ? lastRenderState.nations.length : 0,
+				firstNation: lastRenderState.nations?.[0] ?? null,
+			},
+			lastInteractionDefer,
+		};
+		lastPanSnapshot = snapshot;
+		if (record) {
+			recordDebug("pan-capture", {
+				label,
+				snapshot,
+			});
+		}
+		return snapshot;
+	}
+
+	function getPanTrace(limit = 40) {
+		const maxItems = Math.max(1, Math.min(200, Math.round(Number(limit) || 40)));
+		return debugEvents
+			.filter((entry) =>
+				entry.type === "pan-event"
+				|| entry.type === "pan-frame"
+				|| entry.type === "pan-capture"
+				|| entry.type === "pan-capture-start"
+				|| entry.type === "pan-capture-stop",
+			)
+			.slice(-maxItems);
+	}
+
+	function exportPanTrace(limit = 40) {
+		const payload = {
+			exportedAt: Date.now(),
+			mode: getDebugMode(),
+			lastPanSnapshot,
+			events: getPanTrace(limit),
+		};
+		recordDebug("pan-trace-export", {
+			limit: Math.max(1, Math.min(200, Math.round(Number(limit) || 40))),
+			eventCount: payload.events.length,
+		});
+		return payload;
+	}
+
+	function parseCoordsText(text) {
+		if (typeof text !== "string" || text.trim().length === 0) return null;
+
+		const normalized = text.replaceAll(",", " ");
+		const xMatch = normalized.match(/(?:^|\b)x\b[^-\d]*(-?\d+(?:\.\d+)?)/i);
+		const zMatch = normalized.match(/(?:^|\b)z\b[^-\d]*(-?\d+(?:\.\d+)?)/i);
+		if (xMatch?.[1] && zMatch?.[1]) {
+			return {
+				x: Math.round(Number(xMatch[1])),
+				z: Math.round(Number(zMatch[1])),
+			};
+		}
+
+		const numericMatches = [...normalized.matchAll(/-?\d+(?:\.\d+)?/g)]
+			.map((match) => Number(match[0]))
+			.filter((value) => Number.isFinite(value));
+		if (numericMatches.length < 2) return null;
+
+		return {
+			x: Math.round(numericMatches[0]),
+			z: Math.round(numericMatches[numericMatches.length - 1]),
+		};
+	}
+
+	function defaultSampleWorldPoint(clientX, clientY, mapContainer) {
+		if (!(mapContainer instanceof HTMLElement)) return null;
+
+		const coordsElement = document.querySelector(coordsSelector);
+		const previousText =
+			coordsElement instanceof HTMLElement ? coordsElement.textContent : null;
+		const mapPane =
+			mapContainer.querySelector?.(".leaflet-map-pane") ||
+			document.querySelector(".leaflet-map-pane") ||
+			mapContainer;
+
+		const event =
+			typeof globalThis.MouseEvent === "function"
+				? new globalThis.MouseEvent("mousemove", {
+					bubbles: true,
+					cancelable: true,
+					clientX,
+					clientY,
+					view: globalThis,
+				})
+				: {
+					type: "mousemove",
+					bubbles: true,
+					cancelable: true,
+					clientX,
+					clientY,
+					view: globalThis,
+				};
+
+		mapPane.dispatchEvent(event);
+		const nextText =
+			coordsElement instanceof HTMLElement ? coordsElement.textContent ?? "" : "";
+		if (coordsElement instanceof HTMLElement && previousText != null) {
+			coordsElement.textContent = previousText;
+		}
+		return parseCoordsText(nextText);
+	}
+
+	function getSampleWorldPoint() {
+		return typeof sampleWorldPoint === "function"
+			? sampleWorldPoint
+			: defaultSampleWorldPoint;
+	}
+
+	function getMapContainer() {
+		const primaryMap = getPrimaryLeafletMap();
+		const primaryContainer = primaryMap?.getContainer?.();
+		if (primaryContainer instanceof HTMLElement) return primaryContainer;
+
+		const fallbackContainer = document.querySelector(".leaflet-container");
+		return fallbackContainer instanceof HTMLElement ? fallbackContainer : null;
+	}
+
+	function getOverlayHost(mapContainer) {
+		const primaryMap = getPrimaryLeafletMap();
+		const primaryOverlayPane = primaryMap?.getPane?.("overlayPane");
+		if (primaryOverlayPane instanceof HTMLElement) return primaryOverlayPane;
+
+		const fallbackOverlayPane = document.querySelector(".leaflet-overlay-pane");
+		if (fallbackOverlayPane instanceof HTMLElement) return fallbackOverlayPane;
+
+		return mapContainer instanceof HTMLElement ? mapContainer : null;
+	}
+
+	function ensureOverlay(overlayHost) {
+		if (!(overlayHost instanceof HTMLElement)) return null;
+
+		let overlay = overlayHost.querySelector(`#${liveOverlayId}`);
+		if (overlay instanceof Element) return overlay;
+
+		const nextOverlay = document.createElementNS
+			? document.createElementNS("http://www.w3.org/2000/svg", "svg")
+			: document.createElement("svg");
+		nextOverlay.setAttribute("id", liveOverlayId);
+		nextOverlay.setAttribute("aria-hidden", "true");
+		nextOverlay.style.position = "absolute";
+		nextOverlay.style.inset = "auto";
+		nextOverlay.style.left = "0";
+		nextOverlay.style.top = "0";
+		nextOverlay.style.width = "0";
+		nextOverlay.style.height = "0";
+		nextOverlay.style.pointerEvents = "none";
+		nextOverlay.style.zIndex = "450";
+		nextOverlay.style.overflow = "visible";
+		nextOverlay.hidden = true;
+
+		const computedPosition = getComputedStyle(overlayHost).position;
+		if (!computedPosition || computedPosition === "static") {
+			overlayHost.style.position = "relative";
+		}
+
+		overlayHost.appendChild(nextOverlay);
+		return nextOverlay;
+	}
+
+	function clearTransientZoomPreview(overlay = null) {
+		if (!(overlay instanceof Element)) return;
+		overlay.style.transform = "none";
+		overlay.style.transformOrigin = "";
+	}
+
+	function getRenderedNationAnchor(nation = null) {
+		if (!nation?.rangeBounds || !nation?.center) return null;
+		const left = Number(nation.rangeBounds.left);
+		const right = Number(nation.rangeBounds.right);
+		const top = Number(nation.rangeBounds.top);
+		const bottom = Number(nation.rangeBounds.bottom);
+		if (![left, right, top, bottom].every(Number.isFinite)) return null;
+
+		return {
+			worldCenter: nation.center,
+			layerPoint: {
+				x: (left + right) / 2,
+				y: (top + bottom) / 2,
+			},
+		};
+	}
+
+	function getNewLayerPointDuringZoom(map, latLng, targetZoom, targetCenter) {
+		if (!map || !latLng) return null;
+		try {
+			if (typeof map._latLngToNewLayerPoint === "function") {
+				const point = map._latLngToNewLayerPoint(latLng, targetZoom, targetCenter);
+				const x = Number(point?.x);
+				const y = Number(point?.y);
+				if (Number.isFinite(x) && Number.isFinite(y)) {
+					return { x, y };
+				}
+			}
+		} catch {}
+
+		try {
+			if (
+				typeof map.project === "function"
+				&& typeof map._getNewPixelOrigin === "function"
+			) {
+				const projected = map.project(latLng, targetZoom);
+				const pixelOrigin = map._getNewPixelOrigin(targetCenter, targetZoom);
+				const x = Number(projected?.x) - Number(pixelOrigin?.x);
+				const y = Number(projected?.y) - Number(pixelOrigin?.y);
+				if (Number.isFinite(x) && Number.isFinite(y)) {
+					return { x, y };
+				}
+			}
+		} catch {}
+
+		return null;
+	}
+
+	function clearZoomAnimationSync(overlay = null) {
+		zoomAnimationState = null;
+		clearTransientZoomPreview(overlay);
+	}
+
+	function applyZoomAnimationSync(map, overlay, event = null) {
+		if (!(overlay instanceof Element)) return false;
+		if (!planningLeafletAdapter?.canProjectWithMap?.(map)) return false;
+		const referenceNation = lastRenderState.nations?.[0] ?? null;
+		const anchor = getRenderedNationAnchor(referenceNation);
+		if (!anchor?.worldCenter || !anchor?.layerPoint) return false;
+
+		const targetZoom = Number(event?.zoom);
+		const targetCenter = event?.center ?? map?.getCenter?.() ?? null;
+		const baseZoom = Number(zoomAnimationState?.baseZoom);
+		if (!Number.isFinite(targetZoom) || !targetCenter || !Number.isFinite(baseZoom)) {
+			return false;
+		}
+
+		const anchorLatLng = planningLeafletAdapter.worldToLatLng(anchor.worldCenter);
+		const nextAnchorPoint = getNewLayerPointDuringZoom(
+			map,
+			anchorLatLng,
+			targetZoom,
+			targetCenter,
+		);
+		if (!anchorLatLng || !nextAnchorPoint) return false;
+
+		const scale = typeof map.getZoomScale === "function"
+			? Number(map.getZoomScale(targetZoom, baseZoom))
+			: 2 ** (targetZoom - baseZoom);
+		if (!Number.isFinite(scale) || scale <= 0) return false;
+
+		const globalTranslation = {
+			x: nextAnchorPoint.x - anchor.layerPoint.x * scale,
+			y: nextAnchorPoint.y - anchor.layerPoint.y * scale,
+		};
+		const overlayLeft = parseCssPixelValue(overlay.style.left) ?? 0;
+		const overlayTop = parseCssPixelValue(overlay.style.top) ?? 0;
+		const localTranslation = {
+			x: globalTranslation.x + (scale - 1) * overlayLeft,
+			y: globalTranslation.y + (scale - 1) * overlayTop,
+		};
+
+		overlay.style.transformOrigin = "0 0";
+		overlay.style.transform =
+			`translate(${localTranslation.x}px, ${localTranslation.y}px) scale(${scale})`;
+		recordDebug("map-event", {
+			type: "zoom-sync-apply",
+			baseZoom: safeNumber(baseZoom, 3),
+			targetZoom: safeNumber(targetZoom, 3),
+			scale: safeNumber(scale, 4),
+			translation: {
+				x: safeNumber(localTranslation.x, 2),
+				y: safeNumber(localTranslation.y, 2),
+			},
+		});
+		return true;
+	}
+
+	function parseCssPixelValue(value) {
+		const numeric = Number.parseFloat(String(value ?? ""));
+		return Number.isFinite(numeric) ? numeric : null;
+	}
+
+	function getTransientZoomPreviewEligibility(overlay, effectiveZoom, referenceNation = null) {
+		if (!(overlay instanceof Element)) {
+			return {
+				eligible: false,
+				reason: "missing-overlay",
+			};
+		}
+		if (!Number.isFinite(lastStableRenderZoom) || !Number.isFinite(effectiveZoom)) {
+			return {
+				eligible: false,
+				reason: "missing-zoom-reference",
+				effectiveZoom: safeNumber(effectiveZoom, 3),
+				lastStableRenderZoom: safeNumber(lastStableRenderZoom, 3),
+			};
+		}
+
+		const zoomDelta = effectiveZoom - lastStableRenderZoom;
+		if (!Number.isFinite(zoomDelta) || Math.abs(zoomDelta) < 0.001) {
+			return {
+				eligible: false,
+				reason: "no-zoom-delta",
+				effectiveZoom: safeNumber(effectiveZoom, 3),
+				lastStableRenderZoom: safeNumber(lastStableRenderZoom, 3),
+				zoomDelta: safeNumber(zoomDelta, 4),
+			};
+		}
+
+		const scale = 2 ** zoomDelta;
+		if (!Number.isFinite(scale) || scale <= 0) {
+			return {
+				eligible: false,
+				reason: "invalid-scale",
+				effectiveZoom: safeNumber(effectiveZoom, 3),
+				lastStableRenderZoom: safeNumber(lastStableRenderZoom, 3),
+				zoomDelta: safeNumber(zoomDelta, 4),
+				scale: safeNumber(scale, 4),
+			};
+		}
+
+		const overlayLeft = parseCssPixelValue(overlay.style.left) ?? 0;
+		const overlayTop = parseCssPixelValue(overlay.style.top) ?? 0;
+		const overlayWidth =
+			parseCssPixelValue(overlay.style.width)
+			?? parseCssPixelValue(overlay.getAttribute?.("width"))
+			?? 0;
+		const overlayHeight =
+			parseCssPixelValue(overlay.style.height)
+			?? parseCssPixelValue(overlay.getAttribute?.("height"))
+			?? 0;
+
+		let originX = overlayWidth / 2;
+		let originY = overlayHeight / 2;
+		const rangeBounds = referenceNation?.rangeBounds;
+		if (rangeBounds) {
+			const nationCenterX = (Number(rangeBounds.left) + Number(rangeBounds.right)) / 2;
+			const nationCenterY = (Number(rangeBounds.top) + Number(rangeBounds.bottom)) / 2;
+			if (Number.isFinite(nationCenterX) && Number.isFinite(nationCenterY)) {
+				originX = nationCenterX - overlayLeft;
+				originY = nationCenterY - overlayTop;
+			}
+		}
+
+		return {
+			eligible: true,
+			scale: safeNumber(scale, 4),
+			effectiveZoom: safeNumber(effectiveZoom, 3),
+			lastStableRenderZoom: safeNumber(lastStableRenderZoom, 3),
+			originX: safeNumber(originX, 2),
+			originY: safeNumber(originY, 2),
+			zoomDelta: safeNumber(zoomDelta, 4),
+		};
+	}
+
+	function clearOverlay(overlay) {
+		if (!(overlay instanceof Element)) return;
+		overlay.replaceChildren();
+		overlay.hidden = true;
+	}
+
+	function createSvgChild(tagName, attrs = {}) {
+		const element = document.createElementNS
+			? document.createElementNS("http://www.w3.org/2000/svg", tagName)
+			: document.createElement(tagName);
+		for (const [name, value] of Object.entries(attrs)) {
+			if (value == null) continue;
+			element.setAttribute(name, String(value));
+		}
+		return element;
+	}
+
+	function computeBounds(points) {
+		if (!Array.isArray(points) || points.length === 0) return null;
+
+		let minX = Number.POSITIVE_INFINITY;
+		let minY = Number.POSITIVE_INFINITY;
+		let maxX = Number.NEGATIVE_INFINITY;
+		let maxY = Number.NEGATIVE_INFINITY;
+
+		for (const point of points) {
+			const x = Number(point?.x);
+			const y = Number(point?.y);
+			if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+			if (x < minX) minX = x;
+			if (y < minY) minY = y;
+			if (x > maxX) maxX = x;
+			if (y > maxY) maxY = y;
+		}
+
+		if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+		return {
+			left: minX,
+			top: minY,
+			right: maxX,
+			bottom: maxY,
+			width: maxX - minX,
+			height: maxY - minY,
+		};
+	}
+
+	function normalizeNation(nation, index = 0) {
+		const x = Number(nation?.center?.x);
+		const z = Number(nation?.center?.z);
+		const rangeRadiusBlocks = Number(nation?.rangeRadiusBlocks);
+		if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+
+		return {
+			id:
+				typeof nation?.id === "string" && nation.id
+					? nation.id
+					: `planning-nation-${index + 1}`,
+			name:
+				typeof nation?.name === "string" && nation.name.trim()
+					? nation.name
+					: `Planning Nation ${index + 1}`,
+			color:
+				typeof nation?.color === "string" && nation.color
+					? nation.color
+					: "#d98936",
+			outlineColor:
+				typeof nation?.outlineColor === "string" && nation.outlineColor
+					? nation.outlineColor
+					: "#fff3cf",
+			rangeRadiusBlocks: Number.isFinite(rangeRadiusBlocks)
+				? Math.max(0, Math.round(rangeRadiusBlocks))
+				: 0,
+			center: {
+				x: Math.round(x),
+				z: Math.round(z),
+			},
+		};
+	}
+
+	function computeProjectionTransform(mapContainer) {
+		if (!(mapContainer instanceof HTMLElement)) {
+			return { ok: false, reason: "missing-map-container" };
+		}
+
+		const rect = mapContainer.getBoundingClientRect();
+		if (
+			!Number.isFinite(rect.width) ||
+			!Number.isFinite(rect.height) ||
+			rect.width <= 0 ||
+			rect.height <= 0
+		) {
+			return { ok: false, reason: "invalid-map-rect" };
+		}
+
+		const sampleDistance = Math.max(
+			32,
+			Math.min(96, Math.floor(rect.width / 4), Math.floor(rect.height / 4)),
+		);
+		const centerClient = {
+			x: rect.left + rect.width / 2,
+			y: rect.top + rect.height / 2,
+		};
+
+		const sample = getSampleWorldPoint();
+		const centerWorld = sample(centerClient.x, centerClient.y, mapContainer);
+		const rightWorld = sample(
+			centerClient.x + sampleDistance,
+			centerClient.y,
+			mapContainer,
+		);
+		const downWorld = sample(
+			centerClient.x,
+			centerClient.y + sampleDistance,
+			mapContainer,
+		);
+		if (!centerWorld || !rightWorld || !downWorld) {
+			return { ok: false, reason: "sample-failed" };
+		}
+
+		const worldDxRight = (rightWorld.x - centerWorld.x) / sampleDistance;
+		const worldDxDown = (downWorld.x - centerWorld.x) / sampleDistance;
+		const worldDzRight = (rightWorld.z - centerWorld.z) / sampleDistance;
+		const worldDzDown = (downWorld.z - centerWorld.z) / sampleDistance;
+		const determinant = worldDxRight * worldDzDown - worldDxDown * worldDzRight;
+		if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-6) {
+			return { ok: false, reason: "singular-transform" };
+		}
+
+		return {
+			ok: true,
+			rect,
+			centerWorld,
+			centerLocal: {
+				x: centerClient.x - rect.left,
+				y: centerClient.y - rect.top,
+			},
+			screenPerWorld: {
+				xx: worldDzDown / determinant,
+				xz: -worldDxDown / determinant,
+				yx: -worldDzRight / determinant,
+				yz: worldDxRight / determinant,
+			},
+		};
+	}
+
+	function toLeafletPoint(point) {
+		if (!point) return null;
+		if (typeof globalThis.L?.point === "function") {
+			return globalThis.L.point(point.x, point.y);
+		}
+		return point;
+	}
+
+	function projectWorldPointToOverlay(worldPoint, transform, map = null) {
+		const containerPoint = projectWorldPoint(worldPoint, transform);
+		if (!containerPoint) return null;
+
+		if (map && typeof map.containerPointToLayerPoint === "function") {
+			try {
+				const layerPoint = map.containerPointToLayerPoint(
+					toLeafletPoint(containerPoint),
+				);
+				const x = Number(layerPoint?.x);
+				const y = Number(layerPoint?.y);
+				if (Number.isFinite(x) && Number.isFinite(y)) {
+					return { x, y };
+				}
+			} catch {}
+		}
+
+		return containerPoint;
+	}
+
+	function projectWorldPointViaLeaflet(worldPoint, map = null) {
+		if (!planningLeafletAdapter?.canProjectWithMap?.(map)) return null;
+		return planningLeafletAdapter.projectWorldToLayerPoint(worldPoint, map);
+	}
+
+	function projectWorldPoint(worldPoint, transform) {
+		const dx = Number(worldPoint?.x) - transform.centerWorld.x;
+		const dz = Number(worldPoint?.z) - transform.centerWorld.z;
+		if (!Number.isFinite(dx) || !Number.isFinite(dz)) return null;
+
+		return {
+			x:
+				transform.centerLocal.x +
+				transform.screenPerWorld.xx * dx +
+				transform.screenPerWorld.xz * dz,
+			y:
+				transform.centerLocal.y +
+				transform.screenPerWorld.yx * dx +
+				transform.screenPerWorld.yz * dz,
+		};
+	}
+
+	function buildPath(points) {
+		const pathPoints = points.filter((point) =>
+			Number.isFinite(Number(point?.x)) && Number.isFinite(Number(point?.y)),
+		);
+		if (pathPoints.length === 0) return "";
+
+		return (
+			pathPoints
+				.map((point, index) =>
+					`${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`,
+				)
+				.join(" ") + " Z"
+		);
+	}
+
+	function normalizePointsForBounds(points, origin) {
+		if (!Array.isArray(points) || !origin) return [];
+		return points.map((point) => ({
+			x: point.x - origin.x,
+			y: point.y - origin.y,
+		}));
+	}
+
+	function scheduleRender(reason = "unspecified") {
+		lastRenderTrigger = reason;
+		recordDebug("schedule-render", {
+			reason,
+			framePending: renderFrame !== 0,
+		});
+		if (renderFrame) return;
+		renderFrame = requestAnimationFrame(() => {
+			renderFrame = 0;
+			render();
+		});
+	}
+
+	function scheduleRenderAfter(delayMs = 0, reason = "delayed") {
+		const normalizedDelay = Math.max(0, Math.round(Number(delayMs) || 0));
+		const timerId = setTimeout(() => {
+			delayedRenderTimers.delete(timerId);
+			scheduleRender(reason);
+		}, normalizedDelay);
+		delayedRenderTimers.add(timerId);
+		timerId?.unref?.();
+	}
+
+	function clearDelayedRenders() {
+		for (const timerId of delayedRenderTimers) {
+			clearTimeout(timerId);
+		}
+		delayedRenderTimers.clear();
+	}
+
+	function scheduleZoomResync(reasonPrefix = "zoom", delays = [0, 80]) {
+		const normalizedDelays = Array.isArray(delays) ? delays : [0, 80];
+		let first = true;
+		for (const delay of normalizedDelays) {
+			const numericDelay = Math.max(0, Math.round(Number(delay) || 0));
+			if (first && numericDelay === 0) {
+				scheduleRender(reasonPrefix);
+				first = false;
+				continue;
+			}
+			const suffix = numericDelay === 0 ? "" : `+${numericDelay}ms`;
+			scheduleRenderAfter(numericDelay, `${reasonPrefix}${suffix}`);
+			first = false;
+		}
+	}
+
+	function getProjectionSamplingStability(map = null, mapContainer = null) {
+		const container = mapContainer instanceof HTMLElement ? mapContainer : null;
+		const className = container?.className || "";
+		const reasons = {
+			containerZoomAnim: /\bleaflet-zoom-anim\b/.test(className),
+			containerPanAnim: /\bleaflet-pan-anim\b/.test(className),
+			mapAnimatingZoom: map?._animatingZoom === true,
+			mapPanAnimInProgress: map?._panAnim?._inProgress === true,
+			mapDragMoving: map?.dragging?._draggable?._moving === true,
+		};
+		const blockingReasons = {
+			containerZoomAnim: reasons.containerZoomAnim,
+			containerPanAnim: reasons.containerPanAnim,
+			mapAnimatingZoom: reasons.mapAnimatingZoom,
+			mapPanAnimInProgress: reasons.mapPanAnimInProgress,
+		};
+		return {
+			stable: !Object.values(blockingReasons).some(Boolean),
+			reasons,
+			blockingReasons,
+		};
+	}
+
+	function capturePanFrame(label = "pan-frame") {
+		panCaptureSampleCount += 1;
+		const shouldRecord = label !== "dragging" || panCaptureSampleCount % 12 === 1;
+		const snapshot = getPanDiagnostics(label, { record: shouldRecord });
+		if (!shouldRecord) return snapshot;
+		recordDebug("pan-frame", {
+			sample: panCaptureSampleCount,
+			snapshot,
+		});
+		return snapshot;
+	}
+
+	function stopPanCapture(reason = "pointerup") {
+		if (!panCaptureActive) return;
+		panCaptureActive = false;
+		if (panCaptureFrame) {
+			cancelAnimationFrame(panCaptureFrame);
+			panCaptureFrame = 0;
+		}
+		recordDebug("pan-capture-stop", {
+			reason,
+			samples: panCaptureSampleCount,
+		});
+		capturePanFrame(`stop:${reason}`);
+	}
+
+	function startPanCapture(reason = "pointerdown") {
+		if (panCaptureActive) return;
+		clearDelayedRenders();
+		panCaptureActive = true;
+		panCaptureSampleCount = 0;
+		recordDebug("pan-capture-start", {
+			reason,
+		});
+		capturePanFrame(`start:${reason}`);
+
+		const tick = () => {
+			if (!panCaptureActive) return;
+			capturePanFrame("dragging");
+			panCaptureFrame = requestAnimationFrame(tick);
+		};
+		panCaptureFrame = requestAnimationFrame(tick);
+	}
+
+	function ensurePointerCaptureListeners(mapContainer = null) {
+		if (!(mapContainer instanceof HTMLElement)) return;
+		if (mapContainer.dataset?.emcdynmapplusPanCaptureBound === "true") return;
+
+		mapContainer.addEventListener("pointerdown", () => startPanCapture("pointerdown"));
+		mapContainer.addEventListener("mousedown", () => startPanCapture("mousedown"));
+		mapContainer.addEventListener("touchstart", () => startPanCapture("touchstart"), {
+			passive: true,
+		});
+		window.addEventListener?.("pointerup", () => stopPanCapture("pointerup"));
+		window.addEventListener?.("mouseup", () => stopPanCapture("mouseup"));
+		window.addEventListener?.("touchend", () => stopPanCapture("touchend"), {
+			passive: true,
+		});
+		window.addEventListener?.("blur", () => stopPanCapture("window-blur"));
+		mapContainer.dataset.emcdynmapplusPanCaptureBound = "true";
+	}
+
+	function ensureMapListeners() {
+		const map = getPrimaryLeafletMap();
+		if (!map || typeof map.on !== "function") return;
+		if (map === attachedMap) {
+			recordDebug("listener-attach-skip", {
+				reason: "already-attached",
+				map: describeAttachedMap(map),
+				listenerStats,
+			});
+			return;
+		}
+
+		attachedMap = map;
+		listenerStats = {
+			attachedAt: Date.now(),
+			attachCount: listenerStats.attachCount + 1,
+			attachedMapDescriptor: describeAttachedMap(map),
+			zoomstart: 0,
+			zoomanim: 0,
+			zoom: 0,
+			zoomend: 0,
+			movestart: 0,
+			move: 0,
+			moveend: 0,
+		};
+		recordDebug("listener-attach", {
+			map: listenerStats.attachedMapDescriptor,
+			listenerStats,
+		});
+		let moveSampleCounter = 0;
+		map.on("movestart", () => {
+			listenerStats.movestart += 1;
+			recordDebug("listener-event", {
+				name: "movestart",
+				count: listenerStats.movestart,
+				map: listenerStats.attachedMapDescriptor,
+			});
+			startPanCapture("movestart");
+			const snapshot = getPanDiagnostics("movestart");
+			recordDebug("pan-event", {
+				phase: "movestart",
+				snapshot,
+			});
+		});
+		map.on("move", () => {
+			listenerStats.move += 1;
+			moveSampleCounter += 1;
+			if (moveSampleCounter % 6 !== 1) return;
+			recordDebug("listener-event", {
+				name: "move",
+				count: listenerStats.move,
+				map: listenerStats.attachedMapDescriptor,
+			});
+			const snapshot = getPanDiagnostics("move");
+			recordDebug("pan-event", {
+				phase: "move",
+				sample: moveSampleCounter,
+				snapshot,
+			});
+		});
+		map.on("moveend", () => {
+			listenerStats.moveend += 1;
+			recordDebug("listener-event", {
+				name: "moveend",
+				count: listenerStats.moveend,
+				map: listenerStats.attachedMapDescriptor,
+			});
+			moveSampleCounter = 0;
+			const snapshot = getPanDiagnostics("moveend");
+			recordDebug("pan-event", {
+				phase: "moveend",
+				snapshot,
+			});
+			stopPanCapture("moveend");
+		});
+		map.on("zoomstart", () => {
+			listenerStats.zoomstart += 1;
+			recordDebug("listener-event", {
+				name: "zoomstart",
+				count: listenerStats.zoomstart,
+				map: listenerStats.attachedMapDescriptor,
+			});
+			clearDelayedRenders();
+			zoomAnimationState = {
+				baseZoom: Number(map.getZoom?.()),
+			};
+			const overlay = getOverlayElement(getMapContainer());
+			clearTransientZoomPreview(overlay);
+			const snapshot = getPanDiagnostics("zoomstart");
+			recordDebug("pan-event", {
+				phase: "zoomstart",
+				snapshot,
+			});
+		});
+		map.on("zoomanim", (event) => {
+			listenerStats.zoomanim += 1;
+			const overlay = getOverlayElement(getMapContainer());
+			const applied = applyZoomAnimationSync(map, overlay, event);
+			recordDebug("listener-event", {
+				name: "zoomanim",
+				count: listenerStats.zoomanim,
+				applied,
+				eventZoom: safeNumber(event?.zoom, 3),
+				map: listenerStats.attachedMapDescriptor,
+			});
+			recordDebug("map-event", {
+				type: "zoomanim",
+				zoom: safeNumber(event?.zoom, 3),
+			});
+		});
+		map.on("zoomend", () => {
+			listenerStats.zoomend += 1;
+			recordDebug("listener-event", {
+				name: "zoomend",
+				count: listenerStats.zoomend,
+				map: listenerStats.attachedMapDescriptor,
+			});
+			const overlay = getOverlayElement(getMapContainer());
+			clearZoomAnimationSync(overlay);
+			const snapshot = getPanDiagnostics("zoomend");
+			recordDebug("pan-event", {
+				phase: "zoomend",
+				snapshot,
+			});
+			scheduleZoomResync("map-zoomend", [0]);
+		});
+		map.on("moveend", () => {
+			const eventZoom = safeNumber(map.getZoom?.(), 3);
+			recordDebug("map-event", {
+				type: "moveend",
+				zoom: eventZoom,
+			});
+			scheduleRender("map-moveend");
+		});
+		map.on("zoom", () => {
+			listenerStats.zoom += 1;
+			const eventZoom = safeNumber(map.getZoom?.(), 3);
+			recordDebug("listener-event", {
+				name: "zoom",
+				count: listenerStats.zoom,
+				zoom: eventZoom,
+				map: listenerStats.attachedMapDescriptor,
+			});
+			recordDebug("map-event", {
+				type: "zoom",
+				zoom: eventZoom,
+			});
+		});
+		map.on("resize load", () => {
+			const eventZoom = safeNumber(map.getZoom?.(), 3);
+			recordDebug("map-event", {
+				type: "resize-load",
+				zoom: eventZoom,
+			});
+			scheduleZoomResync("map-resize-load");
+		});
+	}
+
+	function ensureRootObserver() {
+		if (rootObserver || typeof MutationObserver !== "function") return;
+		const root = document.documentElement;
+		if (!(root instanceof HTMLElement)) return;
+
+		rootObserver = new MutationObserver((mutations) => {
+			for (const mutation of mutations) {
+				if (
+					mutation.type === "attributes" &&
+					mutation.attributeName === pageMapZoomAttr
+				) {
+					const nextZoomAttr =
+						document.documentElement?.getAttribute?.(pageMapZoomAttr) ?? null;
+					if (nextZoomAttr === lastObservedRootZoomAttr) {
+						recordDebug("map-event", {
+							type: "root-zoom-attr-ignored",
+							zoom: nextZoomAttr,
+						});
+						continue;
+					}
+					lastObservedRootZoomAttr = nextZoomAttr;
+					recordDebug("root-zoom-attr", {
+						zoomAttr: nextZoomAttr,
+					});
+					ensureMapListeners();
+					scheduleZoomResync("root-zoom-attr", [0, 80]);
+					break;
+				}
+			}
+		});
+		rootObserver.observe(root, {
+			attributes: true,
+			attributeFilter: [pageMapZoomAttr],
+		});
+		lastObservedRootZoomAttr = root.getAttribute(pageMapZoomAttr);
+	}
+
+	function ensurePolling() {
+		if (pollTimer) return;
+
+		const poll = () => {
+			pollTimer = 0;
+			const mapContainer = getMapContainer();
+			if (!(mapContainer instanceof HTMLElement)) {
+				pollTimer = setTimeout(poll, 250);
+				pollTimer?.unref?.();
+				return;
+			}
+
+			ensureMapListeners();
+			ensurePointerCaptureListeners(mapContainer);
+			scheduleRender("poll");
+		};
+
+		pollTimer = setTimeout(poll, 0);
+		pollTimer?.unref?.();
+	}
+
+	function render() {
+		const map = getPrimaryLeafletMap();
+		ensureMapListeners();
+		const mapContainer = getMapContainer();
+		ensurePointerCaptureListeners(mapContainer);
+		recordDebug("render-start", {
+			trigger: lastRenderTrigger,
+			liveReady: isLiveReady(),
+			rootZoomAttr: document.documentElement?.getAttribute?.(pageMapZoomAttr) ?? null,
+			map: summarizeMap(map),
+			mapContainer: summarizeElementBox(mapContainer),
+		});
+		const overlayHost = getOverlayHost(mapContainer);
+		const overlay = ensureOverlay(overlayHost);
+		const effectiveZoom = readEffectiveZoom(map);
+		const nativeProjectionAvailable = !!planningLeafletAdapter?.canProjectWithMap?.(map);
+		const projectionMode = nativeProjectionAvailable ? "leaflet-native" : "sampled-transform";
+		const stability = getProjectionSamplingStability(map, mapContainer);
+		if (!nativeProjectionAvailable && !stability.stable) {
+			clearTransientZoomPreview(overlay);
+			lastInteractionDefer = {
+				trigger: lastRenderTrigger,
+				reason: "unstable-projection-state",
+				projectionMode,
+				effectiveZoom: safeNumber(effectiveZoom, 3),
+				lastStableRenderZoom: safeNumber(lastStableRenderZoom, 3),
+				stability,
+				previewEligibility: getTransientZoomPreviewEligibility(
+					overlay,
+					effectiveZoom,
+					lastRenderState.nations?.[0] ?? null,
+				),
+			};
+			recordDebug("interaction-defer", {
+				trigger: lastRenderTrigger,
+				reason: "unstable-projection-state",
+				projectionMode,
+				effectiveZoom: lastInteractionDefer.effectiveZoom,
+				lastStableRenderZoom: lastInteractionDefer.lastStableRenderZoom,
+				stability,
+				previewEligibility: lastInteractionDefer.previewEligibility,
+			});
+			scheduleRenderAfter(50, `${lastRenderTrigger}+stable-wait`);
+			return lastRenderState;
+		}
+		lastInteractionDefer = null;
+		if (!(mapContainer instanceof HTMLElement)) {
+			lastRenderState = { ok: false, reason: "missing-map-container", projectionMode, nations: [] };
+			setLiveReady(false);
+			recordDebug("render-failed", {
+				trigger: lastRenderTrigger,
+				reason: lastRenderState.reason,
+			});
+			ensurePolling();
+			return lastRenderState;
+		}
+
+		if (!(overlayHost instanceof HTMLElement)) {
+			lastRenderState = { ok: false, reason: "missing-overlay-host", projectionMode, nations: [] };
+			setLiveReady(false);
+			recordDebug("render-failed", {
+				trigger: lastRenderTrigger,
+				reason: lastRenderState.reason,
+				mapContainer: summarizeElementBox(mapContainer),
+			});
+			return lastRenderState;
+		}
+
+		if (!(overlay instanceof Element)) {
+			lastRenderState = { ok: false, reason: "missing-overlay", projectionMode, nations: [] };
+			setLiveReady(false);
+			recordDebug("render-failed", {
+				trigger: lastRenderTrigger,
+				reason: lastRenderState.reason,
+				overlayHost: summarizeElementBox(overlayHost),
+			});
+			return lastRenderState;
+		}
+
+		if (!isPlanningModeActive()) {
+			clearOverlay(overlay);
+			clearZoomAnimationSync(overlay);
+			lastRenderState = { ok: true, reason: "inactive-map-mode", projectionMode, nations: [] };
+			recordDebug("render-skipped", {
+				trigger: lastRenderTrigger,
+				reason: lastRenderState.reason,
+			});
+			return lastRenderState;
+		}
+
+		let transform = null;
+		if (!nativeProjectionAvailable) {
+			transform = computeProjectionTransform(mapContainer);
+		}
+		if (!nativeProjectionAvailable && !transform.ok) {
+			clearOverlay(overlay);
+			clearZoomAnimationSync(overlay);
+			lastRenderState = { ok: false, reason: transform.reason, projectionMode, nations: [] };
+			setLiveReady(false);
+			recordDebug("render-failed", {
+				trigger: lastRenderTrigger,
+				reason: lastRenderState.reason,
+				map: summarizeMap(map),
+				mapContainer: summarizeElementBox(mapContainer),
+				overlayHost: summarizeElementBox(overlayHost),
+			});
+			ensurePolling();
+			return lastRenderState;
+		}
+
+		const nations = getPlanningNations()
+			.map((nation, index) => normalizeNation(nation, index))
+			.filter((nation) => nation != null);
+		if (nations.length === 0) {
+			clearOverlay(overlay);
+			clearZoomAnimationSync(overlay);
+			lastRenderState = { ok: true, reason: "no-nations", projectionMode, nations: [] };
+			setLiveReady(true);
+			recordDebug("render-complete", {
+				trigger: lastRenderTrigger,
+				reason: lastRenderState.reason,
+				overlayHost: summarizeElementBox(overlayHost),
+				overlay: summarizeElementBox(overlay),
+			});
+			return lastRenderState;
+		}
+
+		const nextChildren = [];
+		const measurements = [];
+		const projectedShapes = [];
+
+		for (const nation of nations) {
+			const rangePoints = createPlanningCircleVertices(
+				nation.center,
+				nation.rangeRadiusBlocks,
+			)
+				.map((point) =>
+					nativeProjectionAvailable
+						? projectWorldPointViaLeaflet(point, map)
+						: projectWorldPointToOverlay(point, transform, map),
+				)
+				.filter((point) => point != null);
+			const centerPoints = createPlanningCircleVertices(
+				nation.center,
+				planningCenterRadius,
+			)
+				.map((point) =>
+					nativeProjectionAvailable
+						? projectWorldPointViaLeaflet(point, map)
+						: projectWorldPointToOverlay(point, transform, map),
+				)
+				.filter((point) => point != null);
+
+			measurements.push({
+				id: nation.id,
+				name: nation.name,
+				center: nation.center,
+				rangeRadiusBlocks: nation.rangeRadiusBlocks,
+				rangeBounds: computeBounds(rangePoints),
+			});
+			projectedShapes.push({
+				nation,
+				rangePoints,
+				centerPoints,
+			});
+		}
+
+		const allPoints = projectedShapes.flatMap((shape) => [
+			...shape.rangePoints,
+			...shape.centerPoints,
+		]);
+		const overallBounds = computeBounds(allPoints);
+		if (!overallBounds) {
+			clearOverlay(overlay);
+			clearZoomAnimationSync(overlay);
+			lastRenderState = { ok: false, reason: "invalid-projected-bounds", projectionMode, nations: [] };
+			setLiveReady(false);
+			recordDebug("render-failed", {
+				trigger: lastRenderTrigger,
+				reason: lastRenderState.reason,
+				projectionMode,
+				measurements,
+			});
+			return lastRenderState;
+		}
+
+		const origin = {
+			x: Math.floor(overallBounds.left - 8),
+			y: Math.floor(overallBounds.top - 8),
+		};
+		const width = Math.max(1, Math.ceil(overallBounds.width + 16));
+		const height = Math.max(1, Math.ceil(overallBounds.height + 16));
+		overlay.style.left = `${origin.x}px`;
+		overlay.style.top = `${origin.y}px`;
+		overlay.style.width = `${width}px`;
+		overlay.style.height = `${height}px`;
+		overlay.setAttribute("width", String(width));
+		overlay.setAttribute("height", String(height));
+		overlay.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+		for (const shape of projectedShapes) {
+			const rangePath = buildPath(normalizePointsForBounds(shape.rangePoints, origin));
+			const centerPath = buildPath(normalizePointsForBounds(shape.centerPoints, origin));
+
+			if (rangePath) {
+				nextChildren.push(
+					createSvgChild("path", {
+						d: rangePath,
+						fill: shape.nation.color,
+						"fill-opacity": "0.2",
+						stroke: shape.nation.outlineColor,
+						"stroke-width": "3",
+						"vector-effect": "non-scaling-stroke",
+						"data-planning-nation-id": shape.nation.id,
+						"data-planning-shape": "range",
+					}),
+				);
+			}
+			if (centerPath) {
+				nextChildren.push(
+					createSvgChild("path", {
+						d: centerPath,
+						fill: "#fff3cf",
+						"fill-opacity": "0.22",
+						stroke: "#1f1200",
+						"stroke-width": "3",
+						"vector-effect": "non-scaling-stroke",
+						"data-planning-nation-id": shape.nation.id,
+						"data-planning-shape": "center",
+					}),
+				);
+			}
+		}
+
+		overlay.replaceChildren(...nextChildren);
+		overlay.hidden = false;
+		clearZoomAnimationSync(overlay);
+		lastRenderState = {
+			ok: true,
+			reason: null,
+			projectionMode,
+			nations: measurements,
+		};
+		lastStableRenderZoom = effectiveZoom;
+		setLiveReady(true);
+		recordDebug("render-complete", {
+			trigger: lastRenderTrigger,
+			reason: null,
+			map: summarizeMap(map),
+			mapContainer: summarizeElementBox(mapContainer),
+			overlayHost: summarizeElementBox(overlayHost),
+			overlay: summarizeElementBox(overlay),
+			projectionMode,
+			transform: nativeProjectionAvailable
+				? {
+					adapterModel: planningLeafletAdapter?.getModel?.() ?? null,
+				}
+				: {
+					centerWorld: transform.centerWorld,
+					centerLocal: {
+						x: safeNumber(transform.centerLocal?.x, 2),
+						y: safeNumber(transform.centerLocal?.y, 2),
+					},
+					screenPerWorld: {
+						xx: safeNumber(transform.screenPerWorld?.xx, 6),
+						xz: safeNumber(transform.screenPerWorld?.xz, 6),
+						yx: safeNumber(transform.screenPerWorld?.yx, 6),
+						yz: safeNumber(transform.screenPerWorld?.yz, 6),
+					},
+				},
+			overallBounds,
+			nations: measurements,
+		});
+		debugInfo(`${planningLayerPrefix}: rendered live planning overlay`, {
+			nationCount: measurements.length,
+		});
+		return lastRenderState;
+	}
+
+	function measureRenderedNation(options = {}) {
+		const nationIndex = Number.isFinite(Number(options.nationIndex))
+			? Number(options.nationIndex)
+			: 0;
+		return lastRenderState.nations?.[nationIndex] ?? null;
+	}
+
+	function init() {
+		if (!listenersAttached) {
+			document.addEventListener(PLANNING_STATE_UPDATED_EVENT, () => scheduleRender("planning-state-updated"));
+			window.addEventListener?.("resize", () => scheduleRender("window-resize"));
+			ensureRootObserver();
+			listenersAttached = true;
+		}
+
+		ensureMapListeners();
+		ensurePolling();
+		scheduleRender();
+		return { ok: true };
+	}
+
+		return {
+			PLANNING_LIVE_READY_ATTR: liveReadyAttr,
+			init,
+			render,
+			scheduleRender,
+			isLiveReady,
+			isDebugEnabled,
+			getDebugMode,
+			setDebugEnabled,
+			setDebugMode,
+			clearDebugEvents,
+			getDebugEvents: () => [...debugEvents],
+			getPanDiagnostics: (label = "manual") => getPanDiagnostics(label),
+			getLastPanSnapshot: () => lastPanSnapshot,
+			getPanTrace,
+			exportPanTrace,
+			getLastRenderState: () => lastRenderState,
+			getLastInteractionDefer: () => lastInteractionDefer,
+			getProjectionSamplingStability: () =>
+				getProjectionSamplingStability(getPrimaryLeafletMap(), getMapContainer()),
+			getProjectionMode: () => lastRenderState.projectionMode ?? null,
+			getListenerStats: () => ({ ...listenerStats }),
+			measureRenderedNation,
+		};
+}
+
+globalThis[PLANNING_LIVE_RENDERER_KEY] = Object.freeze({
+	PLANNING_LIVE_READY_ATTR,
+	createPlanningLiveRenderer,
+});
+})();

@@ -135,6 +135,12 @@ class FakeElement extends FakeNode {
 		return this.attributes.has(name) ? this.attributes.get(name) : null;
 	}
 
+	removeAttribute(name) {
+		this.attributes.delete(name);
+		if (name === "id") this.id = "";
+		if (name === "class") this.className = "";
+	}
+
 	querySelector(selector) {
 		return this.__queryMap.get(selector) ?? null;
 	}
@@ -345,6 +351,9 @@ function createDocumentEnvironment() {
 				default:
 					return new FakeHTMLElement(tagName);
 			}
+		},
+		createElementNS(_namespace, tagName) {
+			return this.createElement(tagName);
 		},
 		createTextNode(text) {
 			return new FakeTextNode(text);

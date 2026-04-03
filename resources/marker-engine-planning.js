@@ -15,6 +15,8 @@ function createMarkerEnginePlanning({
 	pageTileSummaryAttr = "data-emcdynmapplus-tile-zoom-summary",
 	appendDynmapPlusManagedLayer,
 	planningLayerDefinition,
+	getPrimaryLeafletMap = () => null,
+	isPlanningModeActive = () => true,
 	debugInfo = () => {},
 } = {}) {
 	if (typeof appendDynmapPlusManagedLayer !== "function") {
@@ -32,6 +34,16 @@ function createMarkerEnginePlanning({
 		globalThis.__EMCDYNMAPPLUS_PLANNING_PROJECTION__?.createPlanningProjectionAdapter;
 	if (typeof planningProjectionFactory !== "function") {
 		throw new Error("marker-engine planning helpers require planning projection helpers");
+	}
+	const planningLeafletAdapterFactory =
+		globalThis.__EMCDYNMAPPLUS_PLANNING_LEAFLET_ADAPTER__?.createPlanningLeafletAdapter;
+	if (typeof planningLeafletAdapterFactory !== "function") {
+		throw new Error("marker-engine planning helpers require planning Leaflet adapter helpers");
+	}
+	const planningLiveRendererFactory =
+		globalThis.__EMCDYNMAPPLUS_PLANNING_LIVE_RENDERER__?.createPlanningLiveRenderer;
+	if (typeof planningLiveRendererFactory !== "function") {
+		throw new Error("marker-engine planning helpers require planning live renderer helpers");
 	}
 	const planningStateFactory =
 		globalThis.__EMCDYNMAPPLUS_PLANNING_STATE__?.createPlanningState;
@@ -56,8 +68,21 @@ function createMarkerEnginePlanning({
 		pageTileSummaryAttr,
 		locationHref: () => globalThis.location.href,
 	});
+	const planningLeafletAdapter = planningLeafletAdapterFactory();
 	planningRuntime.init();
 	globalThis.EMCDYNMAPPLUS_PAGE_PLANNING_RUNTIME = planningRuntime;
+	const planningLiveRenderer = planningLiveRendererFactory({
+		planningLayerPrefix,
+		planningCenterRadius,
+		createPlanningCircleVertices,
+		planningLeafletAdapter,
+		getPlanningNations: () => planningRuntime.getPlanningNations(),
+		getPrimaryLeafletMap,
+		isPlanningModeActive,
+		debugInfo,
+	});
+	planningLiveRenderer.init();
+	globalThis.EMCDYNMAPPLUS_PAGE_PLANNING_LIVE_RENDERER = planningLiveRenderer;
 
 	function loadPlanningNations() {
 		const planningNations = planningRuntime.getPlanningNations();
@@ -347,6 +372,51 @@ function createMarkerEnginePlanning({
 	}
 
 	function getPlanningRenderMeasurements(options = {}) {
+		const liveMeasurement = planningLiveRenderer.measureRenderedNation(options);
+		if (liveMeasurement?.rangeBounds) {
+			const tileZoom = readNumericRootAttribute(pageTileZoomAttr);
+			return {
+				ok: true,
+				reason: null,
+				zoomLevel: Number.isFinite(tileZoom) ? tileZoom : null,
+				nation: {
+					id: liveMeasurement.id || null,
+					name: liveMeasurement.name || null,
+					center: liveMeasurement.center || null,
+					rangeRadiusBlocks: liveMeasurement.rangeRadiusBlocks,
+					outlineColor: null,
+				},
+				rangeMeasurement: {
+					ok: true,
+					cssBounds: {
+						left: Number(liveMeasurement.rangeBounds.left.toFixed(2)),
+						top: Number(liveMeasurement.rangeBounds.top.toFixed(2)),
+						right: Number(liveMeasurement.rangeBounds.right.toFixed(2)),
+						bottom: Number(liveMeasurement.rangeBounds.bottom.toFixed(2)),
+						width: Number(liveMeasurement.rangeBounds.width.toFixed(2)),
+						height: Number(liveMeasurement.rangeBounds.height.toFixed(2)),
+					},
+				},
+				renderedDiameterPx: Number(
+					Math.max(
+						liveMeasurement.rangeBounds.width,
+						liveMeasurement.rangeBounds.height,
+					).toFixed(2),
+				),
+				blocksPerPixel: Number(
+					(
+						(liveMeasurement.rangeRadiusBlocks * 2) /
+						Math.max(
+							liveMeasurement.rangeBounds.width,
+							liveMeasurement.rangeBounds.height,
+							1,
+						)
+					).toFixed(6),
+				),
+				cursorPreview: getPlanningCursorPreviewMetrics(),
+			};
+		}
+
 		const canvas = document.querySelector(".leaflet-overlay-pane canvas.leaflet-zoom-animated");
 		if (!(canvas instanceof HTMLCanvasElement)) {
 			return {
@@ -406,6 +476,32 @@ function createMarkerEnginePlanning({
 			},
 			getCursorPreviewMetrics: () => getPlanningCursorPreviewMetrics(),
 			getProjectionSignals: () => getPlanningProjectionSignals(),
+			getLiveRendererState: () => planningLiveRenderer.getLastRenderState?.() ?? null,
+			getLiveRendererInteractionDefer: () =>
+				planningLiveRenderer.getLastInteractionDefer?.() ?? null,
+			getLiveRendererProjectionStability: () =>
+				planningLiveRenderer.getProjectionSamplingStability?.() ?? null,
+			getLiveRendererProjectionMode: () =>
+				planningLiveRenderer.getProjectionMode?.() ?? null,
+			getLiveRendererListenerStats: () =>
+				planningLiveRenderer.getListenerStats?.() ?? null,
+			getLiveRendererDebugEvents: () => planningLiveRenderer.getDebugEvents?.() ?? [],
+			getLiveRendererDebugMode: () => planningLiveRenderer.getDebugMode?.() ?? "off",
+			getLiveRendererPanDiagnostics: (label = "manual") =>
+				planningLiveRenderer.getPanDiagnostics?.(label) ?? null,
+			getLastLiveRendererPanSnapshot: () =>
+				planningLiveRenderer.getLastPanSnapshot?.() ?? null,
+			getLiveRendererPanTrace: (limit = 40) =>
+				planningLiveRenderer.getPanTrace?.(limit) ?? [],
+			exportLiveRendererPanTrace: (limit = 40) =>
+				planningLiveRenderer.exportPanTrace?.(limit) ?? null,
+			isLiveRendererDebugEnabled: () => planningLiveRenderer.isDebugEnabled?.() ?? false,
+			setLiveRendererDebugEnabled: (enabled) =>
+				planningLiveRenderer.setDebugEnabled?.(enabled) ?? false,
+			setLiveRendererDebugMode: (mode) =>
+				planningLiveRenderer.setDebugMode?.(mode) ?? false,
+			clearLiveRendererDebugEvents: () =>
+				planningLiveRenderer.clearDebugEvents?.() ?? undefined,
 		};
 	}
 
@@ -468,6 +564,7 @@ function createMarkerEnginePlanning({
 		getPlanningRenderMeasurements,
 		exposePlanningDebugHelpers,
 		addPlanningLayer,
+		isLivePlanningRendererSupported: () => true,
 	};
 }
 

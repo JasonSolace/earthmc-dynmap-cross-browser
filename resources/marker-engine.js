@@ -344,6 +344,7 @@ const {
 	appendDynmapPlusManagedLayer,
 	patchLeafletLayerControls,
 	initLeafletMapDiagnostics,
+	getPrimaryLeafletMap,
 } = markerEnginePageMapFactory({
 	pageMapPrefix: PAGE_MAP_PREFIX,
 	debugInfo: pageMarkersDebugInfo,
@@ -377,6 +378,7 @@ const {
 	addPlanningLayer,
 	exposePlanningDebugHelpers,
 	getPlanningProjectionSignals,
+	isLivePlanningRendererSupported,
 } = markerEnginePlanningFactory({
 	plannerStorageKey: PLANNER_STORAGE_KEY,
 	planningLayerPrefix: PLANNING_LAYER_PREFIX,
@@ -390,6 +392,8 @@ const {
 	pageTileSummaryAttr: PAGE_TILE_SUMMARY_ATTR,
 	appendDynmapPlusManagedLayer,
 	planningLayerDefinition: DYNMAP_PLUS_LAYER_DEFINITIONS.planningNations,
+	getPrimaryLeafletMap,
+	isPlanningModeActive: () => currentMapMode() === "planning",
 	debugInfo: pageMarkersDebugInfo,
 });
 
@@ -539,7 +543,7 @@ async function modifyMarkersInPage(data) {
 				) || result;
 		}
 	}
-	if (mapMode === "planning") {
+	if (mapMode === "planning" && !isLivePlanningRendererSupported()) {
 		result = addPlanningLayer(result);
 	}
 

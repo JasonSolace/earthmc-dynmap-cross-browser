@@ -18,14 +18,27 @@ function cloneSerializable(value) {
 	}
 }
 
+function parseEventDetail(detail) {
+	if (typeof detail === "string") {
+		try {
+			return JSON.parse(detail);
+		} catch {
+			return null;
+		}
+	}
+
+	return cloneSerializable(detail);
+}
+
 function dispatchPlanningStateUpdated(detail = {}) {
 	if (!globalThis.document?.dispatchEvent || typeof globalThis.CustomEvent !== "function") {
 		return false;
 	}
+	const payload = cloneSerializable(detail) ?? {};
 
 	globalThis.document.dispatchEvent(
 		new globalThis.CustomEvent(PLANNING_STATE_UPDATED_EVENT, {
-			detail,
+			detail: JSON.stringify(payload),
 		}),
 	);
 	return true;
@@ -73,10 +86,11 @@ function createPlanningRuntime({
 	}
 
 	function handlePlanningStateUpdated(event) {
-		const detail =
+		const rawDetail =
 			event && typeof event === "object" && "detail" in event
 				? event.detail
 				: null;
+		const detail = parseEventDetail(rawDetail);
 		const source =
 			typeof detail?.source === "string" && detail.source
 				? detail.source

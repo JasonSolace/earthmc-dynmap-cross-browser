@@ -1,0 +1,165 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { loadIifeScript, loadIifeScripts } from "./helpers/script-harness.mjs";
+
+function loadPlanningLiveRenderer(options = {}) {
+	return loadIifeScript(
+		"resources/planning-live-renderer.js",
+		["createPlanningLiveRenderer", "PLANNING_LIVE_READY_ATTR"],
+		options,
+	);
+}
+
+test("planning live renderer creates an overlay and marks itself ready after rendering", () => {
+	const { exports, document, localStorage } = loadPlanningLiveRenderer();
+	const mapContainer = document.createElement("div");
+	mapContainer.setBoundingClientRect({
+		left: 0,
+		top: 0,
+		width: 800,
+		height: 600,
+		right: 800,
+		bottom: 600,
+	});
+	document.__setQuery(".leaflet-container", mapContainer);
+
+	const renderer = exports.createPlanningLiveRenderer({
+		createPlanningCircleVertices(point, radiusBlocks) {
+			return [
+				{ x: point.x - radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z - radiusBlocks },
+				{ x: point.x + radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z + radiusBlocks },
+			];
+		},
+		getPlanningNations: () => [
+			{
+				id: "nation-1",
+				name: "Nation 1",
+				center: { x: 100, z: 200 },
+				rangeRadiusBlocks: 50,
+				color: "#123456",
+				outlineColor: "#abcdef",
+			},
+		],
+		getPrimaryLeafletMap: () => ({
+			getContainer: () => mapContainer,
+			on() {},
+		}),
+		sampleWorldPoint(clientX, clientY) {
+			return {
+				x: Math.round(clientX),
+				z: Math.round(clientY),
+			};
+		},
+	});
+
+	const result = renderer.render();
+	assert.equal(result.ok, true);
+	assert.equal(renderer.isLiveReady(), true);
+	assert.equal(
+		document.documentElement.getAttribute(exports.PLANNING_LIVE_READY_ATTR),
+		"true",
+	);
+
+	const overlay = mapContainer.children.find(
+		(child) => child.id === "emcdynmapplus-planning-live-overlay",
+	);
+	assert.ok(overlay);
+	assert.equal(overlay.hidden, false);
+	assert.ok(renderer.measureRenderedNation()?.rangeBounds);
+
+	assert.equal(renderer.isDebugEnabled(), false);
+	assert.equal(renderer.getDebugMode(), "off");
+	assert.equal(renderer.setDebugMode("pan"), true);
+	assert.equal(renderer.getDebugMode(), "pan");
+	assert.equal(localStorage["emcdynmapplus-planning-live-debug-mode"], "pan");
+	assert.equal(renderer.isDebugEnabled(), true);
+	assert.equal(renderer.setDebugEnabled(true), true);
+	assert.equal(localStorage["emcdynmapplus-planning-live-debug"], "true");
+	assert.equal(renderer.getDebugMode(), "all");
+	assert.equal(renderer.isDebugEnabled(), true);
+
+	renderer.render();
+	const debugEvents = renderer.getDebugEvents();
+	assert.ok(debugEvents.length > 0);
+	assert.equal(debugEvents.at(-1)?.type, "render-complete");
+
+	const panTrace = renderer.exportPanTrace(10);
+	assert.equal(panTrace.mode, "all");
+	assert.ok(Array.isArray(panTrace.events));
+
+	renderer.clearDebugEvents();
+	assert.equal(renderer.getDebugEvents().length, 0);
+});
+
+test("planning live renderer uses native Leaflet projection when an adapter is provided", () => {
+	const { exports, context, document } = loadIifeScripts(
+		[
+			"resources/planning-leaflet-adapter.js",
+			"resources/planning-live-renderer.js",
+		],
+		["createPlanningLiveRenderer"],
+	);
+	const mapContainer = document.createElement("div");
+	mapContainer.setBoundingClientRect({
+		left: 0,
+		top: 0,
+		width: 800,
+		height: 600,
+		right: 800,
+		bottom: 600,
+	});
+	document.__setQuery(".leaflet-container", mapContainer);
+
+	context.L = {
+		latLng(lat, lng) {
+			return { lat, lng };
+		},
+	};
+
+	const adapter =
+		context.__EMCDYNMAPPLUS_PLANNING_LEAFLET_ADAPTER__?.createPlanningLeafletAdapter?.();
+	const renderer = exports.createPlanningLiveRenderer({
+		planningLeafletAdapter: adapter,
+		createPlanningCircleVertices(point, radiusBlocks) {
+			return [
+				{ x: point.x - radiusBlocks, z: point.z },
+				{ x: point.x + radiusBlocks, z: point.z },
+			];
+		},
+		getPlanningNations: () => [
+			{
+				id: "nation-1",
+				name: "Nation 1",
+				center: { x: 100, z: 200 },
+				rangeRadiusBlocks: 50,
+			},
+		],
+		getPrimaryLeafletMap: () => ({
+			getContainer: () => mapContainer,
+			on() {},
+			latLngToLayerPoint(latLng) {
+				return {
+					x: latLng.lng * 2,
+					y: latLng.lat * 3,
+				};
+			},
+			layerPointToLatLng(point) {
+				return {
+					lat: point.y / 3,
+					lng: point.x / 2,
+				};
+			},
+		}),
+		sampleWorldPoint() {
+			throw new Error("sampleWorldPoint should not be used for native projection");
+		},
+	});
+
+	const result = renderer.render();
+	assert.equal(result.ok, true);
+	assert.equal(result.projectionMode, "leaflet-native");
+	assert.ok(renderer.measureRenderedNation()?.rangeBounds);
+});
