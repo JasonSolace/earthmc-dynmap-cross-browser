@@ -33,6 +33,13 @@
 	const PLANNING_TILE_DOMINANT_ZOOM_ATTR =
 		"data-emcdynmapplus-tile-dominant-zoom";
 	const PLANNING_TILE_SUMMARY_ATTR = "data-emcdynmapplus-tile-zoom-summary";
+	const planningProjectionFactory =
+		globalThis.__EMCDYNMAPPLUS_PLANNING_PROJECTION__?.createPlanningProjectionAdapter;
+	if (typeof planningProjectionFactory !== "function") {
+		throw new Error(
+			"emcdynmapplus: planning projection helpers were not loaded before menu-planning-preview.js",
+		);
+	}
 
 	function createMenuPlanningPreview({
 		planningUiPrefix = "emcdynmapplus[planning-ui]",
@@ -84,6 +91,15 @@
 		let planningCursorPreviewRuntimeZoomSource = null;
 		let planningCursorPreviewLastWheelAt = 0;
 		let planningCursorPreviewLastLogSignature = null;
+		const planningProjection = planningProjectionFactory({
+			pageMapZoomAttr: PLANNING_LEAFLET_ZOOM_ATTR,
+			pageMapContainerAttr: PLANNING_LEAFLET_MAP_CONTAINER_ATTR,
+			pageTileZoomAttr: PLANNING_TILE_ZOOM_ATTR,
+			pageTileUrlAttr: PLANNING_TILE_URL_ATTR,
+			pageTileDominantZoomAttr: PLANNING_TILE_DOMINANT_ZOOM_ATTR,
+			pageTileSummaryAttr: PLANNING_TILE_SUMMARY_ATTR,
+			locationHref: () => window.location.href,
+		});
 
 		function getPlanningCursorPreview() {
 			return document.querySelector(`#${PLANNING_CURSOR_PREVIEW_ID}`);
@@ -119,34 +135,7 @@
 			return preview;
 		}
 
-		function readNumericRootAttribute(name) {
-			const rawValue = document.documentElement.getAttribute(name);
-			if (rawValue == null || rawValue === "") return null;
-
-			const parsedValue = Number(rawValue);
-			return Number.isFinite(parsedValue) ? parsedValue : null;
-		}
-
-		function readJsonRootAttribute(name) {
-			const rawValue = document.documentElement.getAttribute(name);
-			if (rawValue == null || rawValue === "") return null;
-
-			try {
-				return JSON.parse(rawValue);
-			} catch {
-				return null;
-			}
-		}
-
-		function parseZoomFromTileUrl(url) {
-			if (typeof url !== "string" || url.length === 0) return null;
-
-			const match = url.match(/\/tiles\/[^/]+\/(-?\d+)\//i);
-			if (!match?.[1]) return null;
-
-			const parsedValue = Number(match[1]);
-			return Number.isFinite(parsedValue) ? parsedValue : null;
-		}
+		const { parseZoomFromTileUrl } = planningProjection;
 
 		function normalizePlanningRange(value) {
 			const numericValue = Number(value);
@@ -176,41 +165,12 @@
 		}
 
 		function getPlanningPreviewInteractionBaseZoom() {
-			const leafletZoom = readNumericRootAttribute(PLANNING_LEAFLET_ZOOM_ATTR);
-			if (leafletZoom != null) return clampPlanningPreviewZoom(leafletZoom);
-
-			if (planningCursorPreviewRuntimeZoom != null) {
-				return clampPlanningPreviewZoom(planningCursorPreviewRuntimeZoom);
-			}
-
-			const urlZoom = (() => {
-				const rawValue = new URL(window.location.href).searchParams.get("zoom");
-				if (rawValue == null || rawValue === "") return null;
-				const parsedValue = Number(rawValue);
-				return Number.isFinite(parsedValue) ? parsedValue : null;
-			})();
-			if (urlZoom != null) return clampPlanningPreviewZoom(urlZoom);
-
-			const dominantTileZoom = readNumericRootAttribute(
-				PLANNING_TILE_DOMINANT_ZOOM_ATTR,
-			);
-			if (dominantTileZoom != null) {
-				return clampPlanningPreviewZoom(dominantTileZoom);
-			}
-
-			const publishedTileZoom = readNumericRootAttribute(PLANNING_TILE_ZOOM_ATTR);
-			if (publishedTileZoom != null) {
-				return clampPlanningPreviewZoom(publishedTileZoom);
-			}
-
-			const activeTile = document.querySelector(
-				".leaflet-tile-pane img.leaflet-tile[src]",
-			);
-			const tileSrc =
-				activeTile instanceof HTMLImageElement
-					? activeTile.currentSrc || activeTile.src || ""
-					: "";
-			return clampPlanningPreviewZoom(parseZoomFromTileUrl(tileSrc));
+			const zoomInfo = planningProjection.readProjectionSignals({
+				runtimeZoom: planningCursorPreviewRuntimeZoom,
+				runtimeZoomSource: planningCursorPreviewRuntimeZoomSource,
+				includeResolvedZoom: true,
+			});
+			return clampPlanningPreviewZoom(zoomInfo.zoomLevel);
 		}
 
 		function stepPlanningCursorPreviewRuntimeZoom(delta, source) {
@@ -219,119 +179,13 @@
 			return setPlanningCursorPreviewRuntimeZoom(baseZoom + delta, source);
 		}
 
-		function getTransformScale(element) {
-			if (!(element instanceof Element)) return null;
-
-			const transform = getComputedStyle(element).transform;
-			if (!transform || transform === "none") return 1;
-
-			try {
-				const matrix = new DOMMatrixReadOnly(transform);
-				const scaleX = Math.hypot(matrix.a, matrix.b);
-				const scaleY = Math.hypot(matrix.c, matrix.d);
-				const averageScale = (scaleX + scaleY) / 2;
-				return Number.isFinite(averageScale) && averageScale > 0
-					? averageScale
-					: 1;
-			} catch {
-				return null;
-			}
-		}
-
-		function roundDebugValue(value, digits = 4) {
-			return Number.isFinite(value) ? Number(value.toFixed(digits)) : null;
-		}
-
 		function getPlanningProjectionProbe() {
-			const urlZoom = (() => {
-				const rawValue = new URL(window.location.href).searchParams.get("zoom");
-				if (rawValue == null || rawValue === "") return null;
-				const parsedValue = Number(rawValue);
-				return Number.isFinite(parsedValue) ? parsedValue : null;
-			})();
-			const leafletZoom = readNumericRootAttribute(PLANNING_LEAFLET_ZOOM_ATTR);
-			const publishedTileZoom = readNumericRootAttribute(PLANNING_TILE_ZOOM_ATTR);
-			const dominantTileZoom = readNumericRootAttribute(
-				PLANNING_TILE_DOMINANT_ZOOM_ATTR,
-			);
-			const publishedTileUrl =
-				document.documentElement.getAttribute(PLANNING_TILE_URL_ATTR) || null;
-			const tileSummary = readJsonRootAttribute(PLANNING_TILE_SUMMARY_ATTR);
-			const activeTile = document.querySelector(
-				".leaflet-tile-pane img.leaflet-tile[src]",
-			);
-			const tileSrc =
-				activeTile instanceof HTMLImageElement
-					? activeTile.currentSrc || activeTile.src || ""
-					: "";
-			const tileImageZoom = parseZoomFromTileUrl(tileSrc);
-			const mapContainer =
-				document.documentElement.getAttribute(
-					PLANNING_LEAFLET_MAP_CONTAINER_ATTR,
-				) || null;
-			const tilePaneScale = getTransformScale(
-				document.querySelector(".leaflet-tile-pane"),
-			);
-			const tileLayerScale = getTransformScale(
-				document.querySelector(".leaflet-tile-pane .leaflet-layer"),
-			);
-			const mapPaneScale = getTransformScale(
-				document.querySelector(".leaflet-map-pane"),
-			);
-			const overlayCanvasScale = getTransformScale(
-				document.querySelector(
-					".leaflet-overlay-pane canvas.leaflet-zoom-animated",
-				),
-			);
-
-			const effectiveZoomFromTilePaneScale =
-				dominantTileZoom == null || tilePaneScale == null || tilePaneScale <= 0
-					? null
-					: dominantTileZoom + Math.log2(tilePaneScale);
-			const effectiveZoomFromTileLayerScale =
-				dominantTileZoom == null || tileLayerScale == null || tileLayerScale <= 0
-					? null
-					: dominantTileZoom + Math.log2(tileLayerScale);
-
-			const zoomCandidates = [
-				{ source: "leaflet", value: leafletZoom },
-				{
-					source: planningCursorPreviewRuntimeZoomSource ?? "runtime",
-					value: planningCursorPreviewRuntimeZoom,
-				},
-				{ source: "url", value: urlZoom },
-				{ source: "tile-dominant", value: dominantTileZoom },
-				{ source: "tile-request", value: publishedTileZoom },
-				{ source: "tile-image", value: tileImageZoom },
-			];
-			const activeZoomCandidate =
-				zoomCandidates.find((candidate) => candidate.value != null) ?? null;
-
-			return {
-				zoomLevel: activeZoomCandidate?.value ?? null,
-				zoomSource: activeZoomCandidate?.source ?? "fallback",
-				urlZoom,
-				leafletZoom,
+			const { href, ...projectionSignals } = planningProjection.readProjectionSignals({
 				runtimeZoom: planningCursorPreviewRuntimeZoom,
 				runtimeZoomSource: planningCursorPreviewRuntimeZoomSource,
-				publishedTileZoom,
-				dominantTileZoom,
-				tileImageZoom,
-				publishedTileUrl,
-				tileSrc: tileSrc || null,
-				tileSummary,
-				mapContainer,
-				tilePaneScale: roundDebugValue(tilePaneScale),
-				tileLayerScale: roundDebugValue(tileLayerScale),
-				mapPaneScale: roundDebugValue(mapPaneScale),
-				overlayCanvasScale: roundDebugValue(overlayCanvasScale),
-				effectiveZoomFromTilePaneScale: roundDebugValue(
-					effectiveZoomFromTilePaneScale,
-				),
-				effectiveZoomFromTileLayerScale: roundDebugValue(
-					effectiveZoomFromTileLayerScale,
-				),
-			};
+				includeResolvedZoom: true,
+			});
+			return projectionSignals;
 		}
 
 		function getPlanningPreviewScaleInfo() {
@@ -448,7 +302,10 @@
 				previewDiameterWasClamped: diameterMetrics.wasClamped,
 				rawCenterDiameterPx: rawCenterDiameter,
 				centerDiameterPx: centerDiameter,
-				blocksPerPixel: roundDebugValue(scaleInfo.blocksPerPixel, 6),
+				blocksPerPixel: planningProjection.roundDebugValue(
+					scaleInfo.blocksPerPixel,
+					6,
+				),
 				calibrationMode: scaleInfo.calibrationMode,
 				zoomLevel: scaleInfo.zoomLevel,
 				zoomSource: scaleInfo.zoomSource,

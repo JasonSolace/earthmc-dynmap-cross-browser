@@ -11,6 +11,7 @@ function loadMenu(options = {}) {
 		[
 			"resources/planning-state.js",
 			"resources/planning-runtime.js",
+			"resources/planning-projection.js",
 			"src/menu-planning-preview.js",
 			"src/menu-planning.js",
 			"src/menu-map-controls.js",

@@ -28,6 +28,11 @@ function createMarkerEnginePlanning({
 	if (typeof planningRuntimeFactory !== "function") {
 		throw new Error("marker-engine planning helpers require planning runtime helpers");
 	}
+	const planningProjectionFactory =
+		globalThis.__EMCDYNMAPPLUS_PLANNING_PROJECTION__?.createPlanningProjectionAdapter;
+	if (typeof planningProjectionFactory !== "function") {
+		throw new Error("marker-engine planning helpers require planning projection helpers");
+	}
 	const planningStateFactory =
 		globalThis.__EMCDYNMAPPLUS_PLANNING_STATE__?.createPlanningState;
 	if (typeof planningStateFactory !== "function") {
@@ -41,6 +46,15 @@ function createMarkerEnginePlanning({
 		planningRuntimePrefix: planningLayerPrefix,
 		loadPlanningNations: () => planningState.loadPlanningNations(),
 		debugInfo,
+	});
+	const planningProjection = planningProjectionFactory({
+		pageMapZoomAttr,
+		pageMapContainerAttr,
+		pageTileZoomAttr,
+		pageTileUrlAttr,
+		pageTileDominantZoomAttr,
+		pageTileSummaryAttr,
+		locationHref: () => globalThis.location.href,
 	});
 	planningRuntime.init();
 	globalThis.EMCDYNMAPPLUS_PAGE_PLANNING_RUNTIME = planningRuntime;
@@ -280,103 +294,55 @@ function createMarkerEnginePlanning({
 		};
 	}
 
-	function readNumericRootAttribute(name) {
-		const rawValue = document.documentElement.getAttribute(name);
-		if (rawValue == null || rawValue === "") return null;
-
-		const parsedValue = Number(rawValue);
-		return Number.isFinite(parsedValue) ? parsedValue : null;
-	}
-
-	function readJsonRootAttribute(name) {
-		const rawValue = document.documentElement.getAttribute(name);
-		if (rawValue == null || rawValue === "") return null;
-
-		try {
-			return JSON.parse(rawValue);
-		} catch {
-			return null;
-		}
-	}
-
-	function parseZoomFromTileUrl(url) {
-		if (typeof url !== "string" || url.length === 0) return null;
-
-		const match = url.match(/\/tiles\/[^/]+\/(-?\d+)\//i);
-		if (!match?.[1]) return null;
-
-		const parsedValue = Number(match[1]);
-		return Number.isFinite(parsedValue) ? parsedValue : null;
-	}
-
-	function getTransformScale(element) {
-		if (!(element instanceof Element)) return null;
-
-		const transform = getComputedStyle(element).transform;
-		if (!transform || transform === "none") return 1;
-
-		try {
-			const matrix = new DOMMatrixReadOnly(transform);
-			const scaleX = Math.hypot(matrix.a, matrix.b);
-			const scaleY = Math.hypot(matrix.c, matrix.d);
-			const averageScale = (scaleX + scaleY) / 2;
-			return Number.isFinite(averageScale) && averageScale > 0 ? averageScale : 1;
-		} catch {
-			return null;
-		}
-	}
-
-	function roundDebugValue(value, digits = 4) {
-		return Number.isFinite(value) ? Number(value.toFixed(digits)) : null;
-	}
+	const {
+		readNumericRootAttribute,
+		readJsonRootAttribute,
+		parseZoomFromTileUrl,
+		getTransformScale,
+		roundDebugValue,
+	} = planningProjection;
 
 	function getPlanningProjectionSignals() {
-		const urlZoom = (() => {
-			const rawValue = new URL(globalThis.location.href).searchParams.get("zoom");
-			if (rawValue == null || rawValue === "") return null;
-			const parsedValue = Number(rawValue);
-			return Number.isFinite(parsedValue) ? parsedValue : null;
-		})();
-		const leafletZoom = readNumericRootAttribute(pageMapZoomAttr);
-		const publishedTileZoom = readNumericRootAttribute(pageTileZoomAttr);
-		const dominantTileZoom = readNumericRootAttribute(pageTileDominantZoomAttr);
-		const tileSummary = readJsonRootAttribute(pageTileSummaryAttr);
-		const publishedTileUrl = document.documentElement.getAttribute(pageTileUrlAttr) || null;
-		const mapContainer = document.documentElement.getAttribute(pageMapContainerAttr) || null;
-		const activeTile = document.querySelector(".leaflet-tile-pane img.leaflet-tile[src]");
-		const tileSrc = activeTile instanceof HTMLImageElement ? activeTile.currentSrc || activeTile.src || "" : "";
-		const tileImageZoom = parseZoomFromTileUrl(tileSrc);
-		const tilePaneScale = getTransformScale(document.querySelector(".leaflet-tile-pane"));
-		const tileLayerScale = getTransformScale(document.querySelector(".leaflet-tile-pane .leaflet-layer"));
-		const mapPaneScale = getTransformScale(document.querySelector(".leaflet-map-pane"));
-		const overlayCanvasScale = getTransformScale(document.querySelector(".leaflet-overlay-pane canvas.leaflet-zoom-animated"));
-		const coordsText = document.querySelector(".leaflet-control-layers.coordinates")?.textContent?.trim?.() || null;
-
-		const effectiveZoomFromTilePaneScale = dominantTileZoom == null || tilePaneScale == null || tilePaneScale <= 0
-			? null
-			: dominantTileZoom + Math.log2(tilePaneScale);
-		const effectiveZoomFromTileLayerScale = dominantTileZoom == null || tileLayerScale == null || tileLayerScale <= 0
-			? null
-			: dominantTileZoom + Math.log2(tileLayerScale);
-
-		return {
-			href: globalThis.location.href,
+		const {
+			href,
 			urlZoom,
 			leafletZoom,
 			publishedTileZoom,
 			dominantTileZoom,
 			tileImageZoom,
 			publishedTileUrl,
-			tileSrc: tileSrc || null,
+			tileSrc,
 			tileSummary,
 			mapContainer,
 			coordsText,
-			tilePaneScale: roundDebugValue(tilePaneScale),
-			tileLayerScale: roundDebugValue(tileLayerScale),
-			mapPaneScale: roundDebugValue(mapPaneScale),
-			overlayCanvasScale: roundDebugValue(overlayCanvasScale),
-			effectiveZoomFromTilePaneScale: roundDebugValue(effectiveZoomFromTilePaneScale),
-			effectiveZoomFromTileLayerScale: roundDebugValue(effectiveZoomFromTileLayerScale),
+			tilePaneScale,
+			tileLayerScale,
+			mapPaneScale,
+			overlayCanvasScale,
+			effectiveZoomFromTilePaneScale,
+			effectiveZoomFromTileLayerScale,
+		} = planningProjection.readProjectionSignals({
+			includeCoordsText: true,
+		});
+
+		return {
+			href,
+			urlZoom,
+			leafletZoom,
+			publishedTileZoom,
+			dominantTileZoom,
+			tileImageZoom,
+			publishedTileUrl,
+			tileSrc,
+			tileSummary,
+			mapContainer,
+			coordsText,
+			tilePaneScale,
+			tileLayerScale,
+			mapPaneScale,
+			overlayCanvasScale,
+			effectiveZoomFromTilePaneScale,
+			effectiveZoomFromTileLayerScale,
 		};
 	}
 
