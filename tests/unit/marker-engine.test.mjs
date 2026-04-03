@@ -8,6 +8,7 @@ const normalize = (value) => JSON.parse(JSON.stringify(value));
 function loadMarkerEngine(options = {}) {
 	return loadIifeScripts(
 		[
+			"resources/planning-state.js",
 			"resources/marker-engine-geometry.js",
 			"resources/marker-engine-httputil.js",
 			"resources/marker-engine-data.js",

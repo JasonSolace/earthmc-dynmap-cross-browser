@@ -4,20 +4,10 @@
 	const MENU_PLANNING_KEY = "EMCDYNMAPPLUS_MENU_PLANNING";
 	if (globalThis[MENU_PLANNING_KEY]) return;
 
-	const PLANNER_STORAGE_KEY = "emcdynmapplus-planner-nations";
 	const PLANNING_PLACEMENT_ARMED_KEY = "emcdynmapplus-planning-placement-armed";
-	const PLANNING_DEFAULT_RANGE_KEY = "emcdynmapplus-planning-default-range";
 	const PLANNING_DEBUG_STATE_KEY = "emcdynmapplus-planning-debug-state";
 	const PLANNING_UI_PREFIX = "emcdynmapplus[planning-ui]";
 	const PLANNING_PLACE_EVENT = "EMCDYNMAPPLUS_PLACE_PLANNING_NATION";
-	const DEFAULT_PLANNING_NATION_RANGE = 5000;
-	const DEFAULT_PLANNING_NATION = {
-		id: "hardcoded-demo-nation",
-		name: "Planning Nation",
-		color: "#d98936",
-		outlineColor: "#fff3cf",
-		rangeRadiusBlocks: DEFAULT_PLANNING_NATION_RANGE,
-	};
 
 	let planningPlacementClickInitialized = false;
 
@@ -40,6 +30,23 @@
 			"emcdynmapplus: menu planning preview helpers were not loaded before menu-planning.js",
 		);
 	}
+	const planningStateFactory =
+		globalThis.__EMCDYNMAPPLUS_PLANNING_STATE__?.createPlanningState;
+	if (typeof planningStateFactory !== "function") {
+		throw new Error(
+			"emcdynmapplus: planning state helpers were not loaded before menu-planning.js",
+		);
+	}
+	const planningState = planningStateFactory();
+	const {
+		defaultPlanningNationRange: DEFAULT_PLANNING_NATION_RANGE,
+		defaultPlanningNation: DEFAULT_PLANNING_NATION,
+		loadPlanningNations,
+		savePlanningNations,
+		getPlanningDefaultRange,
+		setPlanningDefaultRange: savePlanningDefaultRange,
+		normalizePlanningNation,
+	} = planningState;
 
 	function setPlanningDebugState(action, details = {}) {
 		try {
@@ -51,62 +58,6 @@
 		} catch {}
 
 		planningDebugInfo(`${PLANNING_UI_PREFIX}: ${action}`, details);
-	}
-
-	function loadPlanningNations() {
-		try {
-			const stored = localStorage[PLANNER_STORAGE_KEY];
-			if (!stored) return [];
-
-			const parsed = JSON.parse(stored);
-			return Array.isArray(parsed) ? parsed : [];
-		} catch {
-			return [];
-		}
-	}
-
-	function savePlanningNations(nations) {
-		localStorage[PLANNER_STORAGE_KEY] = JSON.stringify(nations);
-	}
-
-	function getPlanningDefaultRange() {
-		const savedRange = normalizePlanningRange(
-			localStorage[PLANNING_DEFAULT_RANGE_KEY],
-		);
-		return savedRange ?? DEFAULT_PLANNING_NATION_RANGE;
-	}
-
-	function normalizePlanningNation(nation) {
-		const x = Number(nation?.center?.x);
-		const z = Number(nation?.center?.z);
-		const rangeRadiusBlocks = Number(nation?.rangeRadiusBlocks);
-		if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
-
-		return {
-			id:
-				typeof nation?.id === "string" && nation.id
-					? nation.id
-					: DEFAULT_PLANNING_NATION.id,
-			name:
-				typeof nation?.name === "string" && nation.name.trim()
-					? nation.name
-					: DEFAULT_PLANNING_NATION.name,
-			color:
-				typeof nation?.color === "string" && nation.color
-					? nation.color
-					: DEFAULT_PLANNING_NATION.color,
-			outlineColor:
-				typeof nation?.outlineColor === "string" && nation.outlineColor
-					? nation.outlineColor
-					: DEFAULT_PLANNING_NATION.outlineColor,
-			rangeRadiusBlocks: Number.isFinite(rangeRadiusBlocks)
-				? Math.max(0, Math.round(rangeRadiusBlocks))
-				: getPlanningDefaultRange(),
-			center: {
-				x: Math.round(x),
-				z: Math.round(z),
-			},
-		};
 	}
 
 	function isPlanningPlacementArmed() {
@@ -168,7 +119,7 @@
 	}
 
 	function setPlanningDefaultRange(range, source = "unknown") {
-		localStorage[PLANNING_DEFAULT_RANGE_KEY] = String(range);
+		savePlanningDefaultRange(range);
 		setPlanningDebugState("updated planning default range", {
 			source,
 			rangeRadiusBlocks: range,

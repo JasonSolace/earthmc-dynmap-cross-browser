@@ -9,6 +9,7 @@ function loadMenu(options = {}) {
 	const { extraGlobals = {}, ...rest } = options;
 	return loadPlainScripts(
 		[
+			"resources/planning-state.js",
 			"src/menu-planning-preview.js",
 			"src/menu-planning.js",
 			"src/menu-map-controls.js",

@@ -23,22 +23,22 @@ function createMarkerEnginePlanning({
 	if (!planningLayerDefinition) {
 		throw new Error("marker-engine planning helpers require a planning layer definition");
 	}
+	const planningStateFactory =
+		globalThis.__EMCDYNMAPPLUS_PLANNING_STATE__?.createPlanningState;
+	if (typeof planningStateFactory !== "function") {
+		throw new Error("marker-engine planning helpers require planning state helpers");
+	}
+	const planningState = planningStateFactory({
+		plannerStorageKey,
+		defaultPlanningNationRange: defaultPlanningRange,
+	});
 
 	function loadPlanningNations() {
-		try {
-			const stored = localStorage[plannerStorageKey];
-			if (!stored) return [];
-
-			const parsed = JSON.parse(stored);
-			const planningNations = Array.isArray(parsed) ? parsed : [];
-			debugInfo(`${planningLayerPrefix}: loaded planning nations from storage`, {
-				nationCount: planningNations.length,
-			});
-			return planningNations;
-		} catch {
-			debugInfo(`${planningLayerPrefix}: failed to parse planning storage, using empty list`);
-			return [];
-		}
+		const planningNations = planningState.loadPlanningNations();
+		debugInfo(`${planningLayerPrefix}: loaded planning nations from storage`, {
+			nationCount: planningNations.length,
+		});
+		return planningNations;
 	}
 
 	function createPlanningCircleVertices(point, radiusBlocks, segments = 96) {
