@@ -23,6 +23,11 @@ function createMarkerEnginePlanning({
 	if (!planningLayerDefinition) {
 		throw new Error("marker-engine planning helpers require a planning layer definition");
 	}
+	const planningRuntimeFactory =
+		globalThis.__EMCDYNMAPPLUS_PLANNING_RUNTIME__?.createPlanningRuntime;
+	if (typeof planningRuntimeFactory !== "function") {
+		throw new Error("marker-engine planning helpers require planning runtime helpers");
+	}
 	const planningStateFactory =
 		globalThis.__EMCDYNMAPPLUS_PLANNING_STATE__?.createPlanningState;
 	if (typeof planningStateFactory !== "function") {
@@ -32,9 +37,16 @@ function createMarkerEnginePlanning({
 		plannerStorageKey,
 		defaultPlanningNationRange: defaultPlanningRange,
 	});
+	const planningRuntime = planningRuntimeFactory({
+		planningRuntimePrefix: planningLayerPrefix,
+		loadPlanningNations: () => planningState.loadPlanningNations(),
+		debugInfo,
+	});
+	planningRuntime.init();
+	globalThis.EMCDYNMAPPLUS_PAGE_PLANNING_RUNTIME = planningRuntime;
 
 	function loadPlanningNations() {
-		const planningNations = planningState.loadPlanningNations();
+		const planningNations = planningRuntime.getPlanningNations();
 		debugInfo(`${planningLayerPrefix}: loaded planning nations from storage`, {
 			nationCount: planningNations.length,
 		});

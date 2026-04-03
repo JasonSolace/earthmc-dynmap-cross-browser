@@ -30,6 +30,15 @@
 			"emcdynmapplus: menu planning preview helpers were not loaded before menu-planning.js",
 		);
 	}
+	const planningRuntimeHelpers = globalThis.__EMCDYNMAPPLUS_PLANNING_RUNTIME__;
+	if (
+		!planningRuntimeHelpers ||
+		typeof planningRuntimeHelpers.dispatchPlanningStateUpdated !== "function"
+	) {
+		throw new Error(
+			"emcdynmapplus: planning runtime helpers were not loaded before menu-planning.js",
+		);
+	}
 	const planningStateFactory =
 		globalThis.__EMCDYNMAPPLUS_PLANNING_STATE__?.createPlanningState;
 	if (typeof planningStateFactory !== "function") {
@@ -47,6 +56,13 @@
 		setPlanningDefaultRange: savePlanningDefaultRange,
 		normalizePlanningNation,
 	} = planningState;
+
+	function notifyPlanningStateUpdated(source, detail = {}) {
+		planningRuntimeHelpers.dispatchPlanningStateUpdated({
+			source,
+			...detail,
+		});
+	}
 
 	function setPlanningDebugState(action, details = {}) {
 		try {
@@ -118,12 +134,18 @@
 		location.href = nextUrl.toString();
 	}
 
-	function setPlanningDefaultRange(range, source = "unknown") {
-		savePlanningDefaultRange(range);
+	function setPlanningDefaultRange(range, source = "unknown", notifyRuntime = true) {
+		const storedRange = savePlanningDefaultRange(range);
 		setPlanningDebugState("updated planning default range", {
 			source,
-			rangeRadiusBlocks: range,
+			rangeRadiusBlocks: storedRange ?? range,
 		});
+		if (notifyRuntime) {
+			notifyPlanningStateUpdated("planning-default-range-updated", {
+				rangeRadiusBlocks: storedRange ?? range,
+				trigger: source,
+			});
+		}
 		updatePlanningCursorPreviewVisual();
 	}
 
@@ -149,8 +171,8 @@
 			return false;
 		}
 
-		setPlanningDefaultRange(normalizedRange, source);
 		const activeNation = getHardcodedPlanningNation();
+		setPlanningDefaultRange(normalizedRange, source, activeNation == null);
 		if (!activeNation) return true;
 
 		savePlanningNations([
@@ -160,6 +182,11 @@
 			source,
 			rangeRadiusBlocks: normalizedRange,
 			center: activeNation.center,
+		});
+		notifyPlanningStateUpdated("planning-nations-updated", {
+			center: activeNation.center,
+			rangeRadiusBlocks: normalizedRange,
+			trigger: source,
 		});
 		reloadPlanningMapAt(activeNation.center);
 		return true;
@@ -204,6 +231,9 @@
 		setPlanningDebugState("removed planning nation", {
 			remainingNationCount: loadPlanningNations().length,
 		});
+		notifyPlanningStateUpdated("planning-nations-cleared", {
+			center: activeNation?.center ?? null,
+		});
 		reloadPlanningMapAt(
 			activeNation?.center ?? parsePlanningCoords(getPlanningCoordsText()),
 		);
@@ -217,6 +247,11 @@
 			source,
 			center: nation.center,
 			rangeRadiusBlocks: nation.rangeRadiusBlocks,
+		});
+		notifyPlanningStateUpdated("planning-nations-updated", {
+			center: nation.center,
+			rangeRadiusBlocks: nation.rangeRadiusBlocks,
+			trigger: source,
 		});
 		return nation;
 	}

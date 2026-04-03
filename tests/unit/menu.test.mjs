@@ -10,6 +10,7 @@ function loadMenu(options = {}) {
 	return loadPlainScripts(
 		[
 			"resources/planning-state.js",
+			"resources/planning-runtime.js",
 			"src/menu-planning-preview.js",
 			"src/menu-planning.js",
 			"src/menu-map-controls.js",

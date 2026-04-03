@@ -9,6 +9,7 @@ function loadMarkerEngine(options = {}) {
 	return loadIifeScripts(
 		[
 			"resources/planning-state.js",
+			"resources/planning-runtime.js",
 			"resources/marker-engine-geometry.js",
 			"resources/marker-engine-httputil.js",
 			"resources/marker-engine-data.js",
