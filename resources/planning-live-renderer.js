@@ -495,7 +495,7 @@ function createPlanningLiveRenderer({
 		return nextOverlay;
 	}
 
-	function clearTransientZoomPreview(overlay = null) {
+	function clearOverlayTransform(overlay = null) {
 		if (!(overlay instanceof Element)) return;
 		overlay.style.transform = "none";
 		overlay.style.transformOrigin = "";
@@ -551,7 +551,7 @@ function createPlanningLiveRenderer({
 
 	function clearZoomAnimationSync(overlay = null) {
 		zoomAnimationState = null;
-		clearTransientZoomPreview(overlay);
+		clearOverlayTransform(overlay);
 	}
 
 	function applyZoomAnimationSync(map, overlay, event = null) {
@@ -612,79 +612,6 @@ function createPlanningLiveRenderer({
 	function parseCssPixelValue(value) {
 		const numeric = Number.parseFloat(String(value ?? ""));
 		return Number.isFinite(numeric) ? numeric : null;
-	}
-
-	function getTransientZoomPreviewEligibility(overlay, effectiveZoom, referenceNation = null) {
-		if (!(overlay instanceof Element)) {
-			return {
-				eligible: false,
-				reason: "missing-overlay",
-			};
-		}
-		if (!Number.isFinite(lastStableRenderZoom) || !Number.isFinite(effectiveZoom)) {
-			return {
-				eligible: false,
-				reason: "missing-zoom-reference",
-				effectiveZoom: safeNumber(effectiveZoom, 3),
-				lastStableRenderZoom: safeNumber(lastStableRenderZoom, 3),
-			};
-		}
-
-		const zoomDelta = effectiveZoom - lastStableRenderZoom;
-		if (!Number.isFinite(zoomDelta) || Math.abs(zoomDelta) < 0.001) {
-			return {
-				eligible: false,
-				reason: "no-zoom-delta",
-				effectiveZoom: safeNumber(effectiveZoom, 3),
-				lastStableRenderZoom: safeNumber(lastStableRenderZoom, 3),
-				zoomDelta: safeNumber(zoomDelta, 4),
-			};
-		}
-
-		const scale = 2 ** zoomDelta;
-		if (!Number.isFinite(scale) || scale <= 0) {
-			return {
-				eligible: false,
-				reason: "invalid-scale",
-				effectiveZoom: safeNumber(effectiveZoom, 3),
-				lastStableRenderZoom: safeNumber(lastStableRenderZoom, 3),
-				zoomDelta: safeNumber(zoomDelta, 4),
-				scale: safeNumber(scale, 4),
-			};
-		}
-
-		const overlayLeft = parseCssPixelValue(overlay.style.left) ?? 0;
-		const overlayTop = parseCssPixelValue(overlay.style.top) ?? 0;
-		const overlayWidth =
-			parseCssPixelValue(overlay.style.width)
-			?? parseCssPixelValue(overlay.getAttribute?.("width"))
-			?? 0;
-		const overlayHeight =
-			parseCssPixelValue(overlay.style.height)
-			?? parseCssPixelValue(overlay.getAttribute?.("height"))
-			?? 0;
-
-		let originX = overlayWidth / 2;
-		let originY = overlayHeight / 2;
-		const rangeBounds = referenceNation?.rangeBounds;
-		if (rangeBounds) {
-			const nationCenterX = (Number(rangeBounds.left) + Number(rangeBounds.right)) / 2;
-			const nationCenterY = (Number(rangeBounds.top) + Number(rangeBounds.bottom)) / 2;
-			if (Number.isFinite(nationCenterX) && Number.isFinite(nationCenterY)) {
-				originX = nationCenterX - overlayLeft;
-				originY = nationCenterY - overlayTop;
-			}
-		}
-
-		return {
-			eligible: true,
-			scale: safeNumber(scale, 4),
-			effectiveZoom: safeNumber(effectiveZoom, 3),
-			lastStableRenderZoom: safeNumber(lastStableRenderZoom, 3),
-			originX: safeNumber(originX, 2),
-			originY: safeNumber(originY, 2),
-			zoomDelta: safeNumber(zoomDelta, 4),
-		};
 	}
 
 	function clearOverlay(overlay) {
@@ -1127,7 +1054,7 @@ function createPlanningLiveRenderer({
 				baseZoom: Number(map.getZoom?.()),
 			};
 			const overlay = getOverlayElement(getMapContainer());
-			clearTransientZoomPreview(overlay);
+			clearOverlayTransform(overlay);
 			const snapshot = getPanDiagnostics("zoomstart");
 			recordDebug("pan-event", {
 				phase: "zoomstart",
@@ -1277,7 +1204,7 @@ function createPlanningLiveRenderer({
 		const projectionMode = nativeProjectionAvailable ? "leaflet-native" : "sampled-transform";
 		const stability = getProjectionSamplingStability(map, mapContainer);
 		if (!nativeProjectionAvailable && !stability.stable) {
-			clearTransientZoomPreview(overlay);
+			clearOverlayTransform(overlay);
 			lastInteractionDefer = {
 				trigger: lastRenderTrigger,
 				reason: "unstable-projection-state",
@@ -1285,11 +1212,6 @@ function createPlanningLiveRenderer({
 				effectiveZoom: safeNumber(effectiveZoom, 3),
 				lastStableRenderZoom: safeNumber(lastStableRenderZoom, 3),
 				stability,
-				previewEligibility: getTransientZoomPreviewEligibility(
-					overlay,
-					effectiveZoom,
-					lastRenderState.nations?.[0] ?? null,
-				),
 			};
 			recordDebug("interaction-defer", {
 				trigger: lastRenderTrigger,
@@ -1298,7 +1220,6 @@ function createPlanningLiveRenderer({
 				effectiveZoom: lastInteractionDefer.effectiveZoom,
 				lastStableRenderZoom: lastInteractionDefer.lastStableRenderZoom,
 				stability,
-				previewEligibility: lastInteractionDefer.previewEligibility,
 			});
 			scheduleRenderAfter(50, `${lastRenderTrigger}+stable-wait`);
 			return lastRenderState;
