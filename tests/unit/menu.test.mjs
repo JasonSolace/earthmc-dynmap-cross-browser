@@ -5,6 +5,101 @@ import { loadPlainScript, loadPlainScripts } from "./helpers/script-harness.mjs"
 
 const normalize = (value) => JSON.parse(JSON.stringify(value));
 
+function findById(node, id) {
+	if (!node || typeof node !== "object") return null;
+	if (node.id === id) return node;
+	for (const child of node.children || []) {
+		const result = findById(child, id);
+		if (result) return result;
+	}
+	return null;
+}
+
+function findByLabel(node, text) {
+	if (!node || typeof node !== "object") return null;
+	if (node.textContent === text) return node;
+	for (const child of node.children || []) {
+		const result = findByLabel(child, text);
+		if (result) return result;
+	}
+	return null;
+}
+
+function findByTitle(node, title) {
+	if (!node || typeof node !== "object") return null;
+	if (node.getAttribute?.("title") === title) return node;
+	for (const child of node.children || []) {
+		const result = findByTitle(child, title);
+		if (result) return result;
+	}
+	return null;
+}
+
+function enableRecursiveIdQueries(element) {
+	if (!element || typeof element !== "object") return element;
+	element.querySelector = function querySelector(selector) {
+		if (typeof selector === "string" && selector.startsWith("#")) {
+			return findById(this, selector.slice(1));
+		}
+		return null;
+	};
+	return element;
+}
+
+function enableToggleAttribute(element) {
+	if (!element || typeof element !== "object") return element;
+	element.toggleAttribute = function toggleAttribute(name, force) {
+		const shouldEnable =
+			force == null ? this.getAttribute(name) == null : Boolean(force);
+		if (shouldEnable) {
+			this.setAttribute(name, "");
+			return true;
+		}
+		this.removeAttribute(name);
+		return false;
+	};
+	return element;
+}
+
+function createElementFactory(document) {
+	return function createElement(tagName, props = {}, children = []) {
+		const element = enableRecursiveIdQueries(document.createElement(tagName));
+		if (props.id) element.id = props.id;
+		if (props.className) element.className = props.className;
+		if (props.text) element.textContent = props.text;
+		if (props.htmlFor) element.htmlFor = props.htmlFor;
+		if (props.type) element.type = props.type;
+		if (props.placeholder) element.placeholder = props.placeholder;
+		if (props.value != null) element.value = props.value;
+		if (props.hidden != null) element.hidden = props.hidden;
+		if (props.disabled != null) element.disabled = props.disabled;
+		if (props.attrs) {
+			for (const [name, value] of Object.entries(props.attrs)) {
+				element.setAttribute(name, value);
+			}
+		}
+		for (const child of children) {
+			if (child != null) element.appendChild(child);
+		}
+		return element;
+	};
+}
+
+function addElementFactory() {
+	return function addElement(parent, child) {
+		parent.appendChild(child);
+		return child;
+	};
+}
+
+function addSidebarSectionFactory(document) {
+	return function addSidebarSection(parent) {
+		const section = enableRecursiveIdQueries(document.createElement("section"));
+		parent.appendChild(section);
+		return section;
+	};
+}
+
 function loadMenu(options = {}) {
 	const { extraGlobals = {}, ...rest } = options;
 	return loadPlainScripts(
@@ -165,6 +260,24 @@ test("menu normalizes stored planning nation data", () => {
 			name: "",
 			color: "",
 			outlineColor: "",
+			towns: [
+				{
+					name: "Alpha Town",
+					x: 100.8,
+					z: -55.2,
+					rangeRadiusBlocks: "1000.9",
+				},
+				{
+					name: "Beta Town",
+					x: 90.2,
+					z: 41.7,
+				},
+				{
+					name: "Broken Town",
+					x: "bad",
+					z: 0,
+				},
+			],
 			}),
 		),
 		{
@@ -174,6 +287,22 @@ test("menu normalizes stored planning nation data", () => {
 			outlineColor: "#fff3cf",
 			rangeRadiusBlocks: 8192,
 			center: { x: 11, z: -4 },
+			towns: [
+				{
+					id: "hardcoded-demo-town-1",
+					name: "Alpha Town",
+					x: 101,
+					z: -55,
+					rangeRadiusBlocks: 1001,
+				},
+				{
+					id: "hardcoded-demo-town-2",
+					name: "Beta Town",
+					x: 90,
+					z: 42,
+					rangeRadiusBlocks: 1500,
+				},
+			],
 		},
 	);
 	localStorage["emcdynmapplus-planning-default-range"] = "3200";
@@ -476,4 +605,295 @@ test("menu shell builds the floating sidebar with the expected live mode label",
 	assert.equal(modeLabel.textContent, "View: Mega Nations");
 	assert.equal(findByClass(sidebar, "sidebar-eyebrow"), null);
 	assert.equal(findByClass(sidebar, "sidebar-title"), null);
+});
+
+test("planning allows chaining towns from connected town ranges", () => {
+	const alerts = [];
+	const seedNation = {
+		id: "nation-1",
+		name: "Planning Nation",
+		color: "#d98936",
+		outlineColor: "#fff3cf",
+		rangeRadiusBlocks: 5000,
+		center: { x: 0, z: 0 },
+		towns: [],
+	};
+	const { context, document, localStorage } = loadMenu({
+		localStorageSeed: {
+			"emcdynmapplus-mapmode": "planning",
+			"emcdynmapplus-planner-nations": JSON.stringify([seedNation]),
+		},
+		extraGlobals: {
+			createElement: null,
+			addElement: null,
+			addSidebarSection: null,
+			getStoredCurrentMapMode() {
+				return "planning";
+			},
+			showAlert(message) {
+				alerts.push(message);
+			},
+		},
+	});
+	const createElement = createElementFactory(document);
+	const addElement = addElementFactory();
+	enableToggleAttribute(document.documentElement);
+	context.createElement = createElement;
+	context.addElement = addElement;
+	context.addSidebarSection = addSidebarSectionFactory(document);
+
+	const sidebar = document.createElement("div");
+	context.EMCDYNMAPPLUS_MENU_PLANNING.addPlanningSection(sidebar);
+
+	const placeTownButton = findById(sidebar, "planning-place-town-button");
+	assert.ok(placeTownButton);
+	placeTownButton.dispatchEvent({ type: "click", target: placeTownButton });
+
+	document.dispatchEvent(
+		new context.CustomEvent("EMCDYNMAPPLUS_PLACE_PLANNING_NATION", {
+			detail: {
+				center: { x: 5000, z: 0 },
+				source: "test-first-town",
+			},
+		}),
+	);
+	placeTownButton.dispatchEvent({ type: "click", target: placeTownButton });
+	document.dispatchEvent(
+		new context.CustomEvent("EMCDYNMAPPLUS_PLACE_PLANNING_NATION", {
+			detail: {
+				center: { x: 6500, z: 0 },
+				source: "test-chained-town",
+			},
+		}),
+	);
+
+	const savedNation = JSON.parse(localStorage["emcdynmapplus-planner-nations"])[0];
+	assert.equal(
+		alerts.includes(
+			"Town centers must be placed within the nation range or a connected town range.",
+		),
+		false,
+	);
+	assert.equal(savedNation.towns.length, 2);
+	assert.deepEqual(
+		savedNation.towns.map((town) => ({ x: town.x, z: town.z })),
+		[
+			{ x: 5000, z: 0 },
+			{ x: 6500, z: 0 },
+		],
+	);
+});
+
+test("planning keeps disconnected towns and marks them in the sidebar", () => {
+	const alerts = [];
+	const seedNation = {
+		id: "nation-1",
+		name: "Planning Nation",
+		color: "#d98936",
+		outlineColor: "#fff3cf",
+		rangeRadiusBlocks: 5000,
+		center: { x: 0, z: 0 },
+		towns: [
+			{
+				id: "town-1",
+				name: "Alpha Town",
+				x: 4900,
+				z: 0,
+				rangeRadiusBlocks: 1500,
+			},
+		],
+	};
+	const { context, document, localStorage } = loadMenu({
+		localStorageSeed: {
+			"emcdynmapplus-mapmode": "planning",
+			"emcdynmapplus-planner-nations": JSON.stringify([seedNation]),
+		},
+		extraGlobals: {
+			createElement: null,
+			addElement: null,
+			addSidebarSection: null,
+			getStoredCurrentMapMode() {
+				return "planning";
+			},
+			showAlert(message) {
+				alerts.push(message);
+			},
+		},
+	});
+	const createElement = createElementFactory(document);
+	const addElement = addElementFactory();
+	enableToggleAttribute(document.documentElement);
+	context.createElement = createElement;
+	context.addElement = addElement;
+	context.addSidebarSection = addSidebarSectionFactory(document);
+
+	const sidebar = document.createElement("div");
+	context.EMCDYNMAPPLUS_MENU_PLANNING.addPlanningSection(sidebar);
+
+	const rangeInput = findById(sidebar, "planning-range-input");
+	assert.ok(rangeInput);
+	rangeInput.value = "4000";
+	rangeInput.dispatchEvent({ type: "change", target: rangeInput });
+
+	assert.equal(alerts.length, 0);
+	assert.equal(rangeInput.value, "4000");
+	const savedNation = JSON.parse(localStorage["emcdynmapplus-planner-nations"])[0];
+	assert.equal(savedNation.rangeRadiusBlocks, 4000);
+	const townList = findById(sidebar, "planning-town-list");
+	assert.ok(townList);
+	assert.equal(
+		townList.children.some(
+			(child) => child.getAttribute?.("data-state") === "disconnected",
+		),
+		true,
+	);
+});
+
+test("planning town range updates existing and future towns together", () => {
+	const seedNation = {
+		id: "nation-1",
+		name: "Planning Nation",
+		color: "#d98936",
+		outlineColor: "#fff3cf",
+		rangeRadiusBlocks: 5000,
+		center: { x: 0, z: 0 },
+		towns: [
+			{
+				id: "town-1",
+				x: 1200,
+				z: 0,
+				rangeRadiusBlocks: 1500,
+			},
+			{
+				id: "town-2",
+				x: 2600,
+				z: 0,
+				rangeRadiusBlocks: 1800,
+			},
+		],
+	};
+	const { context, document, localStorage } = loadMenu({
+		localStorageSeed: {
+			"emcdynmapplus-mapmode": "planning",
+			"emcdynmapplus-planner-nations": JSON.stringify([seedNation]),
+		},
+		extraGlobals: {
+			createElement: null,
+			addElement: null,
+			addSidebarSection: null,
+			getStoredCurrentMapMode() {
+				return "planning";
+			},
+			showAlert() {},
+		},
+	});
+	const createElement = createElementFactory(document);
+	const addElement = addElementFactory();
+	enableToggleAttribute(document.documentElement);
+	context.createElement = createElement;
+	context.addElement = addElement;
+	context.addSidebarSection = addSidebarSectionFactory(document);
+
+	const sidebar = document.createElement("div");
+	context.EMCDYNMAPPLUS_MENU_PLANNING.addPlanningSection(sidebar);
+
+	const townRangeInput = findById(sidebar, "planning-town-range-input");
+	assert.ok(townRangeInput);
+	townRangeInput.value = "2000";
+	townRangeInput.dispatchEvent({ type: "change", target: townRangeInput });
+
+	let savedNation = JSON.parse(localStorage["emcdynmapplus-planner-nations"])[0];
+	assert.deepEqual(
+		savedNation.towns.map((town) => town.rangeRadiusBlocks),
+		[2000, 2000],
+	);
+
+	const placeTownButton = findById(sidebar, "planning-place-town-button");
+	assert.ok(placeTownButton);
+	placeTownButton.dispatchEvent({ type: "click", target: placeTownButton });
+	document.dispatchEvent(
+		new context.CustomEvent("EMCDYNMAPPLUS_PLACE_PLANNING_NATION", {
+			detail: {
+				center: { x: 4200, z: 0 },
+				source: "test-new-town-range",
+			},
+		}),
+	);
+
+	savedNation = JSON.parse(localStorage["emcdynmapplus-planner-nations"])[0];
+	assert.equal(savedNation.towns[2].rangeRadiusBlocks, 2000);
+});
+
+test("planning can reposition an existing town from the sidebar", () => {
+	const alerts = [];
+	const seedNation = {
+		id: "nation-1",
+		name: "Planning Nation",
+		color: "#d98936",
+		outlineColor: "#fff3cf",
+		rangeRadiusBlocks: 5000,
+		center: { x: 0, z: 0 },
+		towns: [
+			{
+				id: "town-1",
+				x: 4000,
+				z: 0,
+				rangeRadiusBlocks: 1500,
+			},
+		],
+	};
+	const { context, document, localStorage } = loadMenu({
+		localStorageSeed: {
+			"emcdynmapplus-mapmode": "planning",
+			"emcdynmapplus-planner-nations": JSON.stringify([seedNation]),
+		},
+		extraGlobals: {
+			createElement: null,
+			addElement: null,
+			addSidebarSection: null,
+			getStoredCurrentMapMode() {
+				return "planning";
+			},
+			showAlert(message) {
+				alerts.push(message);
+			},
+		},
+	});
+	const createElement = createElementFactory(document);
+	const addElement = addElementFactory();
+	enableToggleAttribute(document.documentElement);
+	context.createElement = createElement;
+	context.addElement = addElement;
+	context.addSidebarSection = addSidebarSectionFactory(document);
+
+	const sidebar = document.createElement("div");
+	context.EMCDYNMAPPLUS_MENU_PLANNING.addPlanningSection(sidebar);
+
+	const repositionButton = findByTitle(sidebar, "Reposition town");
+	assert.ok(repositionButton);
+	repositionButton.dispatchEvent({ type: "click", target: repositionButton });
+
+	document.dispatchEvent(
+		new context.CustomEvent("EMCDYNMAPPLUS_PLACE_PLANNING_NATION", {
+			detail: {
+				center: { x: 4700, z: 300 },
+				source: "test-reposition-town",
+			},
+		}),
+	);
+
+	assert.equal(
+		alerts.includes(
+			"Town centers must be placed within the nation range or a connected town range.",
+		),
+		false,
+	);
+	const savedNation = JSON.parse(localStorage["emcdynmapplus-planner-nations"])[0];
+	assert.deepEqual(savedNation.towns[0], {
+		id: "town-1",
+		name: "Town 1",
+		x: 4700,
+		z: 300,
+		rangeRadiusBlocks: 1500,
+	});
 });

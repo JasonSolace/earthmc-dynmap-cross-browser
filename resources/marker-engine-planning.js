@@ -7,6 +7,7 @@ function createMarkerEnginePlanning({
 	planningLayerPrefix = "emcdynmapplus[planning-layer]",
 	defaultPlanningRange = 5000,
 	planningCenterRadius = 48,
+	planningTownMarkerRadius = 28,
 	planningPlacementArmedKey = "emcdynmapplus-planning-placement-armed",
 	planningPlaceEvent = "EMCDYNMAPPLUS_PLACE_PLANNING_NATION",
 	planningNativePlacementReadyAttr = "data-emcdynmapplus-planning-native-placement-ready",
@@ -57,6 +58,7 @@ function createMarkerEnginePlanning({
 		plannerStorageKey,
 		defaultPlanningNationRange: defaultPlanningRange,
 	});
+	const polygonClipping = globalThis.polygonClipping ?? null;
 	const planningRuntime = planningRuntimeFactory({
 		planningRuntimePrefix: planningLayerPrefix,
 		loadPlanningNations: () => planningState.loadPlanningNations(),
@@ -83,7 +85,10 @@ function createMarkerEnginePlanning({
 	const planningLiveRenderer = planningLiveRendererFactory({
 		planningLayerPrefix,
 		planningCenterRadius,
+		planningTownMarkerRadius,
 		createPlanningCircleVertices,
+		createPlanningRangeMultiPolygon:
+			polygonClipping?.union ? createPlanningRangeMultiPolygon : null,
 		planningLeafletAdapter,
 		getPlanningNations: () => planningRuntime.getPlanningNations(),
 		getPrimaryLeafletMap,
@@ -93,6 +98,14 @@ function createMarkerEnginePlanning({
 	planningLiveRenderer.init();
 	globalThis.EMCDYNMAPPLUS_PAGE_PLANNING_LIVE_RENDERER = planningLiveRenderer;
 	initPlanningNativePlacementBridge();
+	const disconnectedPlanningFillColor = "#c44f45";
+	const disconnectedPlanningOutlineColor = "#ffd2cd";
+	const connectedPlanningTownFillColor = "#c9782c";
+	const connectedPlanningTownOutlineColor = "#ffe0b4";
+	const disconnectedPlanningTownFillColor = "#b53f34";
+	const disconnectedPlanningTownOutlineMarkerColor = "#ffd2cd";
+	const planningCenterFillColor = "#d98936";
+	const planningCenterOutlineColor = "#fff3cf";
 
 	function setPlanningNativePlacementReady(ready) {
 		const root = document.documentElement;
@@ -144,12 +157,17 @@ function createMarkerEnginePlanning({
 		let listenerAttached = false;
 		let pollTimer = 0;
 
+		function scheduleReadyStatePoll() {
+			pollTimer = globalThis.setTimeout(updateReadyState, 250);
+			pollTimer?.unref?.();
+		}
+
 		const updateReadyState = () => {
 			const ready = canUseNativePlanningPlacement();
 			setPlanningNativePlacementReady(ready);
 			if (ready) return true;
 
-			pollTimer = globalThis.setTimeout(updateReadyState, 250);
+			scheduleReadyStatePoll();
 			return false;
 		};
 
@@ -223,39 +241,181 @@ function createMarkerEnginePlanning({
 		return polygon;
 	}
 
+	function createPlanningCircleRing(point, radiusBlocks, segments = 128) {
+		const vertices = createPlanningCircleVertices(point, radiusBlocks, segments)
+			.map((vertex) => [vertex.x, vertex.z]);
+		if (vertices.length === 0) return [];
+		return [...vertices, vertices[0]];
+	}
+
+	function createPlanningCirclePolygon(point, radiusBlocks, segments = 128) {
+		return [[createPlanningCircleRing(point, radiusBlocks, segments)]];
+	}
+
+	function convertPlanningMultiPolygonToMarkerPoints(multiPolygon) {
+		if (!Array.isArray(multiPolygon)) return [];
+		return multiPolygon
+			.map((polygon) =>
+				Array.isArray(polygon)
+					? polygon
+						.map((ring) =>
+							Array.isArray(ring)
+								? ring
+									.map((point) => {
+										const x = Number(point?.[0]);
+										const z = Number(point?.[1]);
+										if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+										return {
+											x,
+											z,
+										};
+									})
+									.filter((point) => point != null)
+								: []
+						)
+						.filter((ring) => ring.length >= 3)
+					: []
+			)
+			.filter((polygon) => polygon.length > 0);
+	}
+
+	function createPlanningRangeMultiPolygonFromPoints(variableRanges) {
+		if (!Array.isArray(variableRanges) || variableRanges.length === 0) return [];
+		if (!polygonClipping?.union) {
+			return variableRanges.map((point) => [
+				createPlanningCircleVertices(point, point.rangeRadiusBlocks, 128),
+			]);
+		}
+
+		const shapes = variableRanges.map((point) =>
+			createPlanningCirclePolygon(point, point.rangeRadiusBlocks, 128),
+		);
+		const [firstShape, ...otherShapes] = shapes;
+		const merged = otherShapes.reduce(
+			(current, shape) => polygonClipping.union(current, shape),
+			firstShape,
+		);
+		return convertPlanningMultiPolygonToMarkerPoints(merged);
+	}
+
+	function createPlanningRangeMultiPolygon(nation) {
+		const connectivity = planningState.getPlanningTownConnectivity(nation);
+		if (!connectivity.nation) return [];
+
+		return createPlanningRangeMultiPolygonFromPoints([
+			{
+				x: connectivity.nation.center.x,
+				z: connectivity.nation.center.z,
+				rangeRadiusBlocks: connectivity.nation.rangeRadiusBlocks,
+			},
+			...connectivity.connectedTowns.map((town) => ({
+				x: town.x,
+				z: town.z,
+				rangeRadiusBlocks: town.rangeRadiusBlocks,
+			})),
+		]);
+	}
+
 	function createPlanningNationMarkers(nation) {
-		return [{
+		const connectivity = planningState.getPlanningTownConnectivity(nation);
+		if (!connectivity.nation) return [];
+
+		const normalizedNation = connectivity.nation;
+		const mergedRangePoints = createPlanningRangeMultiPolygon(normalizedNation);
+		const disconnectedRangePoints = createPlanningRangeMultiPolygonFromPoints(
+			connectivity.disconnectedTowns.map((town) => ({
+				x: town.x,
+				z: town.z,
+				rangeRadiusBlocks: town.rangeRadiusBlocks,
+			})),
+		);
+		const townMarkers = normalizedNation.towns.map((town) => {
+			const isDisconnected = connectivity.disconnectedTownIds.has(town.id);
+			return {
+				type: "polygon",
+				points: [[createPlanningCircleVertices(town, planningTownMarkerRadius)]],
+				weight: 2,
+				color: isDisconnected
+					? disconnectedPlanningTownOutlineMarkerColor
+					: connectedPlanningTownOutlineColor,
+				opacity: 1,
+				fillColor: isDisconnected
+					? disconnectedPlanningTownFillColor
+					: connectedPlanningTownFillColor,
+				fillOpacity: 0.94,
+				tooltip: `<div><b>${isDisconnected ? "Disconnected Town" : "Town"}</b></div>`,
+				popup: [
+					`<div><span style="font-size:120%;"><b>${
+						isDisconnected ? "Disconnected Town" : "Town"
+					}</b></span><br>`,
+					`${normalizedNation.name}<br>`,
+					`Status: ${isDisconnected ? "Disconnected" : "Connected"}<br>`,
+					`X: ${town.x}<br>`,
+					`Z: ${town.z}<br>`,
+					`Range: ${town.rangeRadiusBlocks} blocks</div>`,
+				].join(""),
+			};
+		});
+		const markers = [{
 			type: "polygon",
-			points: [[createPlanningCircleVertices(nation.center, nation.rangeRadiusBlocks)]],
+			points:
+				mergedRangePoints.length > 0
+					? mergedRangePoints
+					: [[
+						createPlanningCircleVertices(
+							normalizedNation.center,
+							normalizedNation.rangeRadiusBlocks,
+						),
+					]],
 			weight: 3,
-			color: nation.outlineColor,
+			color: normalizedNation.outlineColor,
 			opacity: 1,
-			fillColor: nation.color,
+			fillColor: normalizedNation.color,
 			fillOpacity: 0.2,
-			tooltip: `<div><b>${nation.name}</b></div>`,
+			tooltip: `<div><b>${normalizedNation.name}</b></div>`,
 			popup: [
-				`<div><span style="font-size:120%;"><b>${nation.name}</b></span><br>`,
+				`<div><span style="font-size:120%;"><b>${normalizedNation.name}</b></span><br>`,
 				`Planning overlay<br>`,
-				`X: ${nation.center.x}<br>`,
-				`Z: ${nation.center.z}<br>`,
-				`Range: ${nation.rangeRadiusBlocks} blocks</div>`,
+				`X: ${normalizedNation.center.x}<br>`,
+				`Z: ${normalizedNation.center.z}<br>`,
+				`Range: ${normalizedNation.rangeRadiusBlocks} blocks<br>`,
+				`Connected towns: ${connectivity.connectedTowns.length}<br>`,
+				`Disconnected towns: ${connectivity.disconnectedTowns.length}</div>`,
 			].join(""),
 		}, {
 			type: "polygon",
-			points: [[createPlanningCircleVertices(nation.center, planningCenterRadius)]],
+			points: [[createPlanningCircleVertices(normalizedNation.center, planningCenterRadius)]],
 			weight: 3,
-			color: "#1f1200",
+			color: planningCenterOutlineColor,
 			opacity: 1,
-			fillColor: "#fff3cf",
-			fillOpacity: 0.22,
-			tooltip: `<div><b>${nation.name} Center</b></div>`,
+			fillColor: planningCenterFillColor,
+			fillOpacity: 0.98,
+			tooltip: `<div><b>${normalizedNation.name} Center</b></div>`,
 			popup: [
-				`<div><span style="font-size:120%;"><b>${nation.name} Center</b></span><br>`,
-				`X: ${nation.center.x}<br>`,
-				`Z: ${nation.center.z}<br>`,
+				`<div><span style="font-size:120%;"><b>${normalizedNation.name} Center</b></span><br>`,
+				`X: ${normalizedNation.center.x}<br>`,
+				`Z: ${normalizedNation.center.z}<br>`,
 				`Center marker radius: ${planningCenterRadius} blocks</div>`,
 			].join(""),
 		}];
+		if (disconnectedRangePoints.length > 0) {
+			markers.push({
+				type: "polygon",
+				points: disconnectedRangePoints,
+				weight: 3,
+				color: disconnectedPlanningOutlineColor,
+				opacity: 1,
+				fillColor: disconnectedPlanningFillColor,
+				fillOpacity: 0.22,
+				tooltip: "<div><b>Disconnected Town Coverage</b></div>",
+				popup: [
+					"<div><span style=\"font-size:120%;\"><b>Disconnected Town Coverage</b></span><br>",
+					`${normalizedNation.name}<br>`,
+					`Disconnected towns: ${connectivity.disconnectedTowns.length}</div>`,
+				].join(""),
+			});
+		}
+		return [...markers, ...townMarkers];
 	}
 
 	function hexToRgb(hex) {
@@ -625,23 +785,7 @@ function createMarkerEnginePlanning({
 
 	function addPlanningLayer(data) {
 		const planningNations = loadPlanningNations()
-			.map((nation, index) => {
-				const x = Number(nation?.center?.x);
-				const z = Number(nation?.center?.z);
-				const rangeRadiusBlocks = Number(nation?.rangeRadiusBlocks);
-				if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
-
-				return {
-					name: typeof nation?.name === "string" && nation.name.trim() ? nation.name : `Nation ${index + 1}`,
-					color: typeof nation?.color === "string" && nation.color ? nation.color : "#d98936",
-					outlineColor: typeof nation?.outlineColor === "string" && nation.outlineColor ? nation.outlineColor : "#fff3cf",
-					center: {
-						x: Math.round(x),
-						z: Math.round(z),
-					},
-					rangeRadiusBlocks: Number.isFinite(rangeRadiusBlocks) ? Math.max(0, Math.round(rangeRadiusBlocks)) : defaultPlanningRange,
-				};
-			})
+			.map((nation) => planningState.normalizePlanningNation(nation))
 			.filter((nation) => nation != null);
 		if (planningNations.length === 0) {
 			debugInfo(`${planningLayerPrefix}: no planning nations found for overlay injection`);
@@ -661,6 +805,7 @@ function createMarkerEnginePlanning({
 				name: nation.name,
 				center: nation.center,
 				rangeRadiusBlocks: nation.rangeRadiusBlocks,
+				townCount: nation.towns?.length ?? 0,
 			})),
 		});
 		return nextData;
@@ -669,6 +814,7 @@ function createMarkerEnginePlanning({
 	return {
 		loadPlanningNations,
 		createPlanningCircleVertices,
+		createPlanningRangeMultiPolygon,
 		createPlanningNationMarkers,
 		hexToRgb,
 		measureCanvasColorBounds,

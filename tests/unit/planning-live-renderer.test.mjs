@@ -68,6 +68,12 @@ test("planning live renderer creates an overlay and marks itself ready after ren
 	);
 	assert.ok(overlay);
 	assert.equal(overlay.hidden, false);
+	assert.equal(
+		overlay.children.filter(
+			(child) => child.getAttribute?.("data-planning-shape") === "center",
+		).length,
+		1,
+	);
 	assert.ok(renderer.measureRenderedNation()?.rangeBounds);
 
 	assert.equal(renderer.isDebugEnabled(), false);
@@ -92,6 +98,60 @@ test("planning live renderer creates an overlay and marks itself ready after ren
 
 	renderer.clearDebugEvents();
 	assert.equal(renderer.getDebugEvents().length, 0);
+});
+
+test("planning live renderer tolerates a Leaflet map before center and size are ready", () => {
+	const { exports, document } = loadPlanningLiveRenderer();
+	const mapContainer = document.createElement("div");
+	mapContainer.setBoundingClientRect({
+		left: 0,
+		top: 0,
+		width: 800,
+		height: 600,
+		right: 800,
+		bottom: 600,
+	});
+	document.__setQuery(".leaflet-container", mapContainer);
+
+	const renderer = exports.createPlanningLiveRenderer({
+		createPlanningCircleVertices(point, radiusBlocks) {
+			return [
+				{ x: point.x - radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z - radiusBlocks },
+				{ x: point.x + radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z + radiusBlocks },
+			];
+		},
+		getPlanningNations: () => [
+			{
+				id: "nation-1",
+				name: "Nation 1",
+				center: { x: 100, z: 200 },
+				rangeRadiusBlocks: 50,
+			},
+		],
+		getPrimaryLeafletMap: () => ({
+			getContainer: () => mapContainer,
+			getCenter() {
+				throw new Error("Set map center and zoom first.");
+			},
+			getSize() {
+				throw new Error("Set map center and zoom first.");
+			},
+			on() {},
+		}),
+		sampleWorldPoint(clientX, clientY) {
+			return {
+				x: Math.round(clientX),
+				z: Math.round(clientY),
+			};
+		},
+	});
+
+	assert.doesNotThrow(() => renderer.init());
+	const result = renderer.render();
+	assert.equal(result.ok, true);
+	assert.equal(renderer.isLiveReady(), true);
 });
 
 test("planning live renderer uses native Leaflet projection when an adapter is provided", () => {
@@ -126,7 +186,9 @@ test("planning live renderer uses native Leaflet projection when an adapter is p
 		createPlanningCircleVertices(point, radiusBlocks) {
 			return [
 				{ x: point.x - radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z - radiusBlocks },
 				{ x: point.x + radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z + radiusBlocks },
 			];
 		},
 		getPlanningNations: () => [
@@ -162,4 +224,160 @@ test("planning live renderer uses native Leaflet projection when an adapter is p
 	assert.equal(result.ok, true);
 	assert.equal(result.projectionMode, "leaflet-native");
 	assert.ok(renderer.measureRenderedNation()?.rangeBounds);
+});
+
+test("planning live renderer marks disconnected town chains separately", () => {
+	const { exports, document } = loadPlanningLiveRenderer();
+	const mapContainer = document.createElement("div");
+	mapContainer.setBoundingClientRect({
+		left: 0,
+		top: 0,
+		width: 800,
+		height: 600,
+		right: 800,
+		bottom: 600,
+	});
+	document.__setQuery(".leaflet-container", mapContainer);
+
+	const renderer = exports.createPlanningLiveRenderer({
+		createPlanningCircleVertices(point, radiusBlocks) {
+			return [
+				{ x: point.x - radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z - radiusBlocks },
+				{ x: point.x + radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z + radiusBlocks },
+			];
+		},
+		getPlanningNations: () => [
+			{
+				id: "nation-1",
+				name: "Nation 1",
+				center: { x: 0, z: 0 },
+				rangeRadiusBlocks: 5000,
+				color: "#123456",
+				outlineColor: "#abcdef",
+				towns: [
+					{
+						id: "town-1",
+						x: 5000,
+						z: 0,
+						rangeRadiusBlocks: 500,
+					},
+					{
+						id: "town-2",
+						x: 6500,
+						z: 0,
+						rangeRadiusBlocks: 1500,
+					},
+				],
+			},
+		],
+		getPrimaryLeafletMap: () => ({
+			getContainer: () => mapContainer,
+			on() {},
+		}),
+		sampleWorldPoint(clientX, clientY) {
+			return {
+				x: Math.round(clientX),
+				z: Math.round(clientY),
+			};
+		},
+	});
+
+	const result = renderer.render();
+	assert.equal(result.ok, true);
+	assert.equal(result.nations[0].disconnectedTownCount, 1);
+
+	const overlay = mapContainer.children.find(
+		(child) => child.id === "emcdynmapplus-planning-live-overlay",
+	);
+	assert.ok(overlay);
+	assert.equal(
+		overlay.children.some(
+			(child) =>
+				child.getAttribute?.("data-planning-shape") === "disconnected-range",
+		),
+		true,
+	);
+	assert.equal(
+		overlay.children.some(
+			(child) =>
+				child.getAttribute?.("data-planning-state") === "disconnected",
+		),
+		true,
+	);
+});
+
+test("planning live renderer highlights hovered towns from the sidebar", () => {
+	const { exports, context, document } = loadPlanningLiveRenderer();
+	const mapContainer = document.createElement("div");
+	mapContainer.setBoundingClientRect({
+		left: 0,
+		top: 0,
+		width: 800,
+		height: 600,
+		right: 800,
+		bottom: 600,
+	});
+	document.__setQuery(".leaflet-container", mapContainer);
+
+	const renderer = exports.createPlanningLiveRenderer({
+		createPlanningCircleVertices(point, radiusBlocks) {
+			return [
+				{ x: point.x - radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z - radiusBlocks },
+				{ x: point.x + radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z + radiusBlocks },
+			];
+		},
+		getPlanningNations: () => [
+			{
+				id: "nation-1",
+				name: "Nation 1",
+				center: { x: 0, z: 0 },
+				rangeRadiusBlocks: 5000,
+				towns: [
+					{
+						id: "town-1",
+						x: 2500,
+						z: 0,
+						rangeRadiusBlocks: 1500,
+					},
+				],
+			},
+		],
+		getPrimaryLeafletMap: () => ({
+			getContainer: () => mapContainer,
+			on() {},
+		}),
+		sampleWorldPoint(clientX, clientY) {
+			return {
+				x: Math.round(clientX),
+				z: Math.round(clientY),
+			};
+		},
+	});
+
+	renderer.init();
+	renderer.render();
+	document.dispatchEvent(
+		new context.CustomEvent("EMCDYNMAPPLUS_PLANNING_TOWN_HOVER", {
+			detail: JSON.stringify({
+				townId: "town-1",
+			}),
+		}),
+	);
+
+	const overlay = mapContainer.children.find(
+		(child) => child.id === "emcdynmapplus-planning-live-overlay",
+	);
+	assert.ok(overlay);
+	assert.equal(
+		overlay.children.some(
+			(child) =>
+				child.getAttribute?.("data-planning-town-id") === "town-1" &&
+				child.getAttribute?.("data-hovered") === "true",
+		),
+		true,
+	);
 });

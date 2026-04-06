@@ -50,6 +50,7 @@
 		isPlanningPlacementArmed,
 		getHardcodedPlanningNation,
 		getPlanningDefaultRange,
+		getPlanningPreviewSubject = () => null,
 		debugInfo = () => {},
 		isDebugLoggingEnabled = () => false,
 	} = {}) {
@@ -265,8 +266,12 @@
 
 		function updatePlanningCursorPreviewVisual() {
 			const preview = ensurePlanningCursorPreviewElement();
+			const previewSubject =
+				getPlanningPreviewSubject() ?? getHardcodedPlanningNation();
 			const range =
-				getHardcodedPlanningNation()?.rangeRadiusBlocks ?? getPlanningDefaultRange();
+				normalizePlanningRange(previewSubject?.rangeRadiusBlocks) ??
+				getHardcodedPlanningNation()?.rangeRadiusBlocks ??
+				getPlanningDefaultRange();
 			const scaleInfo = getPlanningPreviewScaleInfo();
 			const diameterMetrics = getScaledPreviewDiameterMetrics(range);
 			const diameter = diameterMetrics.previewDiameterPx;

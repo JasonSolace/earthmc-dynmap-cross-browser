@@ -6,11 +6,23 @@ const PLANNING_LIVE_READY_ATTR = "data-emcdynmapplus-planning-live-ready";
 const PLANNING_LIVE_OVERLAY_ID = "emcdynmapplus-planning-live-overlay";
 const DEFAULT_COORDS_SELECTOR = ".leaflet-control-layers.coordinates";
 const PLANNING_STATE_UPDATED_EVENT = "EMCDYNMAPPLUS_PLANNING_STATE_UPDATED";
+const PLANNING_TOWN_HOVER_EVENT = "EMCDYNMAPPLUS_PLANNING_TOWN_HOVER";
 const DEFAULT_PAGE_MAP_ZOOM_ATTR = "data-emcdynmapplus-leaflet-zoom";
 const PLANNING_LIVE_DEBUG_STORAGE_KEY = "emcdynmapplus-planning-live-debug";
 const PLANNING_LIVE_DEBUG_MODE_STORAGE_KEY = "emcdynmapplus-planning-live-debug-mode";
 const GLOBAL_DEBUG_STORAGE_KEY = "emcdynmapplus-debug";
 const MAX_DEBUG_EVENTS = 200;
+const MARKER_ZOOM_MIN = -2;
+const MARKER_ZOOM_MAX = 5;
+const DEFAULT_TOWN_RANGE_BLOCKS = 1500;
+const DISCONNECTED_RANGE_FILL = "#c44f45";
+const DISCONNECTED_RANGE_STROKE = "#ffd2cd";
+const CONNECTED_TOWN_FILL = "#c9782c";
+const CONNECTED_TOWN_STROKE = "#ffe0b4";
+const DISCONNECTED_TOWN_FILL = "#b53f34";
+const DISCONNECTED_TOWN_STROKE = "#ffd2cd";
+const NATION_CENTER_FILL = "#d98936";
+const NATION_CENTER_STROKE = "#fff3cf";
 
 function createPlanningLiveRenderer({
 	planningLayerPrefix = "emcdynmapplus[planning-layer]",
@@ -19,7 +31,9 @@ function createPlanningLiveRenderer({
 	coordsSelector = DEFAULT_COORDS_SELECTOR,
 	pageMapZoomAttr = DEFAULT_PAGE_MAP_ZOOM_ATTR,
 	planningCenterRadius = 48,
+	planningTownMarkerRadius = 28,
 	createPlanningCircleVertices,
+	createPlanningRangeMultiPolygon = null,
 	planningLeafletAdapter = null,
 	getPlanningNations = () => [],
 	getPrimaryLeafletMap = () => null,
@@ -66,6 +80,11 @@ function createPlanningLiveRenderer({
 		nations: [],
 	};
 	let pollTimer = 0;
+	let hoveredTownId = null;
+	const planningStateFactory =
+		globalThis.__EMCDYNMAPPLUS_PLANNING_STATE__?.createPlanningState;
+	const planningState =
+		typeof planningStateFactory === "function" ? planningStateFactory() : null;
 
 	function setLiveReady(ready) {
 		const root = document.documentElement;
@@ -151,6 +170,33 @@ function createPlanningLiveRenderer({
 		return Number(numeric.toFixed(digits));
 	}
 
+	function clamp(value, min, max) {
+		return Math.min(Math.max(value, min), max);
+	}
+
+	function lerp(start, end, factor) {
+		return start + (end - start) * factor;
+	}
+
+	function getZoomAwareMarkerMetrics(effectiveZoom = null) {
+		const numericZoom = Number(effectiveZoom);
+		const clampedZoom = Number.isFinite(numericZoom)
+			? clamp(numericZoom, MARKER_ZOOM_MIN, MARKER_ZOOM_MAX)
+			: 1;
+		const zoomFactor =
+			(clampedZoom - MARKER_ZOOM_MIN) /
+			(MARKER_ZOOM_MAX - MARKER_ZOOM_MIN);
+
+		return {
+			zoom: clampedZoom,
+			zoomFactor,
+			nationRadiusPx: lerp(4.75, 9.25, zoomFactor),
+			nationStrokePx: lerp(1.5, 2.5, zoomFactor),
+			townRadiusPx: lerp(2.5, 5.5, zoomFactor),
+			townStrokePx: lerp(1, 1.75, zoomFactor),
+		};
+	}
+
 	function summarizeRect(rect) {
 		if (!rect) return null;
 		return {
@@ -163,14 +209,25 @@ function createPlanningLiveRenderer({
 		};
 	}
 
+	function safeMapCall(map = null, methodName, ...args) {
+		if (!map || typeof map !== "object") return null;
+		const method = map?.[methodName];
+		if (typeof method !== "function") return null;
+		try {
+			return method.call(map, ...args);
+		} catch {
+			return null;
+		}
+	}
+
 	function summarizeMap(map = null) {
 		if (!map || typeof map !== "object") return null;
-		const container = map.getContainer?.();
-		const center = map.getCenter?.();
-		const size = map.getSize?.();
+		const container = safeMapCall(map, "getContainer");
+		const center = safeMapCall(map, "getCenter");
+		const size = safeMapCall(map, "getSize");
 		return {
 			hasMap: true,
-			zoom: safeNumber(map.getZoom?.(), 3),
+			zoom: safeNumber(safeMapCall(map, "getZoom"), 3),
 			center: center
 				? {
 					lat: safeNumber(center.lat, 5),
@@ -215,9 +272,9 @@ function createPlanningLiveRenderer({
 
 	function describeAttachedMap(map = null) {
 		if (!map || typeof map !== "object") return null;
-		const container = map.getContainer?.();
+		const container = safeMapCall(map, "getContainer");
 		return {
-			zoom: safeNumber(map.getZoom?.(), 3),
+			zoom: safeNumber(safeMapCall(map, "getZoom"), 3),
 			containerId: container?.id || null,
 			containerClassName: container?.className || null,
 			hasOn: typeof map.on === "function",
@@ -227,7 +284,7 @@ function createPlanningLiveRenderer({
 	}
 
 	function readEffectiveZoom(map = null) {
-		const mapZoom = Number(map?.getZoom?.());
+		const mapZoom = Number(safeMapCall(map, "getZoom"));
 		if (Number.isFinite(mapZoom)) return mapZoom;
 
 		const rootZoomRaw = document.documentElement?.getAttribute?.(pageMapZoomAttr);
@@ -300,9 +357,20 @@ function createPlanningLiveRenderer({
 		return pane instanceof HTMLElement ? pane : null;
 	}
 
+	function findDescendantElementById(root, id) {
+		if (!(root instanceof Element) || typeof id !== "string" || !id) return null;
+		if (root.getAttribute?.("id") === id || root.id === id) return root;
+		for (const child of root.children ?? []) {
+			const found = findDescendantElementById(child, id);
+			if (found) return found;
+		}
+		return null;
+	}
+
 	function getOverlayElement(mapContainer = null) {
 		const overlay = document.getElementById?.(liveOverlayId)
 			|| mapContainer?.querySelector?.(`#${liveOverlayId}`)
+			|| findDescendantElementById(mapContainer, liveOverlayId)
 			|| null;
 		return overlay instanceof Element ? overlay : null;
 	}
@@ -502,7 +570,20 @@ function createPlanningLiveRenderer({
 	}
 
 	function getRenderedNationAnchor(nation = null) {
-		if (!nation?.rangeBounds || !nation?.center) return null;
+		if (!nation?.center) return null;
+		const anchorX = Number(nation?.centerLayerPoint?.x);
+		const anchorY = Number(nation?.centerLayerPoint?.y);
+		if (Number.isFinite(anchorX) && Number.isFinite(anchorY)) {
+			return {
+				worldCenter: nation.center,
+				layerPoint: {
+					x: anchorX,
+					y: anchorY,
+				},
+			};
+		}
+
+		if (!nation?.rangeBounds) return null;
 		const left = Number(nation.rangeBounds.left);
 		const right = Number(nation.rangeBounds.right);
 		const top = Number(nation.rangeBounds.top);
@@ -620,6 +701,40 @@ function createPlanningLiveRenderer({
 		overlay.hidden = true;
 	}
 
+	function updateHoveredTownVisual() {
+		const overlay = getOverlayElement(getMapContainer());
+		if (!(overlay instanceof Element)) return;
+		for (const child of overlay.children ?? []) {
+			if (child?.getAttribute?.("data-planning-shape") !== "town") continue;
+			const townId = child.getAttribute("data-planning-town-id");
+			const baseRadius = Number(child.getAttribute("data-base-radius"));
+			const baseStrokeWidth = Number(child.getAttribute("data-base-stroke-width"));
+			const isHovered =
+				typeof townId === "string" && townId && townId === hoveredTownId;
+			if (isHovered) {
+				child.setAttribute("r", String((baseRadius + 1.35).toFixed(2)));
+				child.setAttribute(
+					"stroke-width",
+					String((baseStrokeWidth + 0.85).toFixed(2)),
+				);
+				child.setAttribute("fill-opacity", "1");
+				child.setAttribute("data-hovered", "true");
+			} else {
+				if (Number.isFinite(baseRadius)) {
+					child.setAttribute("r", String(baseRadius.toFixed(2)));
+				}
+				if (Number.isFinite(baseStrokeWidth)) {
+					child.setAttribute(
+						"stroke-width",
+						String(baseStrokeWidth.toFixed(2)),
+					);
+				}
+				child.setAttribute("fill-opacity", "0.96");
+				child.removeAttribute("data-hovered");
+			}
+		}
+	}
+
 	function createSvgChild(tagName, attrs = {}) {
 		const element = document.createElementNS
 			? document.createElementNS("http://www.w3.org/2000/svg", tagName)
@@ -661,6 +776,16 @@ function createPlanningLiveRenderer({
 	}
 
 	function normalizeNation(nation, index = 0) {
+		if (planningState?.normalizePlanningNation) {
+			const normalizedNation = planningState.normalizePlanningNation(nation);
+			if (!normalizedNation) return null;
+			return {
+				...normalizedNation,
+				id: normalizedNation.id || `planning-nation-${index + 1}`,
+				name: normalizedNation.name || `Planning Nation ${index + 1}`,
+			};
+		}
+
 		const x = Number(nation?.center?.x);
 		const z = Number(nation?.center?.z);
 		const rangeRadiusBlocks = Number(nation?.rangeRadiusBlocks);
@@ -690,6 +815,123 @@ function createPlanningLiveRenderer({
 				x: Math.round(x),
 				z: Math.round(z),
 			},
+			towns: Array.isArray(nation?.towns)
+				? nation.towns
+					.map((town, townIndex) => {
+						const townX = Number(town?.x);
+						const townZ = Number(town?.z);
+						const townRangeRadiusBlocks = Number(town?.rangeRadiusBlocks);
+						if (!Number.isFinite(townX) || !Number.isFinite(townZ)) return null;
+						return {
+							id:
+								typeof town?.id === "string" && town.id
+									? town.id
+									: `planning-town-${index + 1}-${townIndex + 1}`,
+							name:
+								typeof town?.name === "string" && town.name.trim()
+									? town.name
+									: `Town ${townIndex + 1}`,
+							x: Math.round(townX),
+							z: Math.round(townZ),
+							rangeRadiusBlocks: Number.isFinite(townRangeRadiusBlocks)
+								? Math.max(0, Math.round(townRangeRadiusBlocks))
+								: DEFAULT_TOWN_RANGE_BLOCKS,
+						};
+					})
+					.filter((town) => town != null)
+				: [],
+		};
+	}
+
+	function getPlanningDistanceSquared(start, end) {
+		const startX = Number(start?.x);
+		const startZ = Number(start?.z);
+		const endX = Number(end?.x);
+		const endZ = Number(end?.z);
+		if (
+			!Number.isFinite(startX) ||
+			!Number.isFinite(startZ) ||
+			!Number.isFinite(endX) ||
+			!Number.isFinite(endZ)
+		) {
+			return null;
+		}
+
+		const deltaX = endX - startX;
+		const deltaZ = endZ - startZ;
+		return deltaX * deltaX + deltaZ * deltaZ;
+	}
+
+	function isPlanningPointWithinRange(point, anchor) {
+		const rangeRadiusBlocks = Number(anchor?.rangeRadiusBlocks);
+		if (!Number.isFinite(rangeRadiusBlocks)) return false;
+
+		const distanceSquared = getPlanningDistanceSquared(anchor, point);
+		if (distanceSquared == null) return false;
+
+		return distanceSquared <= rangeRadiusBlocks * rangeRadiusBlocks;
+	}
+
+	function getPlanningTownConnectivity(nation) {
+		if (planningState?.getPlanningTownConnectivity) {
+			return planningState.getPlanningTownConnectivity(nation);
+		}
+
+		const normalizedNation = normalizeNation(nation);
+		if (!normalizedNation) {
+			return {
+				nation: null,
+				connectedAnchors: [],
+				connectedTowns: [],
+				disconnectedTowns: [],
+				connectedTownIds: new Set(),
+				disconnectedTownIds: new Set(),
+			};
+		}
+
+		const connectedAnchors = [{
+			id: normalizedNation.id,
+			x: normalizedNation.center.x,
+			z: normalizedNation.center.z,
+			rangeRadiusBlocks: normalizedNation.rangeRadiusBlocks,
+			type: "nation",
+		}];
+		const connectedTownIds = new Set();
+		const remainingTowns = [...normalizedNation.towns];
+		let didConnectTown = true;
+
+		while (didConnectTown && remainingTowns.length > 0) {
+			didConnectTown = false;
+			for (let index = remainingTowns.length - 1; index >= 0; index -= 1) {
+				const town = remainingTowns[index];
+				const canConnect = connectedAnchors.some((anchor) =>
+					isPlanningPointWithinRange(town, anchor),
+				);
+				if (!canConnect) continue;
+
+				connectedTownIds.add(town.id);
+				connectedAnchors.push({
+					...town,
+					type: "town",
+				});
+				remainingTowns.splice(index, 1);
+				didConnectTown = true;
+			}
+		}
+
+		const connectedTowns = normalizedNation.towns.filter((town) =>
+			connectedTownIds.has(town.id),
+		);
+		const disconnectedTowns = normalizedNation.towns.filter(
+			(town) => !connectedTownIds.has(town.id),
+		);
+		return {
+			nation: normalizedNation,
+			connectedAnchors,
+			connectedTowns,
+			disconnectedTowns,
+			connectedTownIds,
+			disconnectedTownIds: new Set(disconnectedTowns.map((town) => town.id)),
 		};
 	}
 
@@ -824,12 +1066,78 @@ function createPlanningLiveRenderer({
 		);
 	}
 
+	function buildMultiPath(polygons) {
+		if (!Array.isArray(polygons)) return "";
+		return polygons
+			.flatMap((polygon) =>
+				Array.isArray(polygon) ? polygon.map((ring) => buildPath(ring)) : [],
+			)
+			.filter(Boolean)
+			.join(" ");
+	}
+
 	function normalizePointsForBounds(points, origin) {
 		if (!Array.isArray(points) || !origin) return [];
 		return points.map((point) => ({
 			x: point.x - origin.x,
 			y: point.y - origin.y,
 		}));
+	}
+
+	function normalizePolygonsForBounds(polygons, origin) {
+		if (!Array.isArray(polygons) || !origin) return [];
+		return polygons
+			.map((polygon) =>
+				Array.isArray(polygon)
+					? polygon
+						.map((ring) => normalizePointsForBounds(ring, origin))
+						.filter((ring) => ring.length > 0)
+					: [],
+			)
+			.filter((polygon) => polygon.length > 0);
+	}
+
+	function flattenPolygons(polygons) {
+		if (!Array.isArray(polygons)) return [];
+		return polygons.flatMap((polygon) =>
+			Array.isArray(polygon) ? polygon.flatMap((ring) => ring) : [],
+		);
+	}
+
+	function createBoundsPointsForCircle(centerPoint, radiusPx) {
+		const x = Number(centerPoint?.x);
+		const y = Number(centerPoint?.y);
+		const radius = Number(radiusPx);
+		if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(radius)) {
+			return [];
+		}
+
+		return [
+			{ x: x - radius, y },
+			{ x: x + radius, y },
+			{ x, y: y - radius },
+			{ x, y: y + radius },
+		];
+	}
+
+	function projectWorldRing(points, projector) {
+		if (!Array.isArray(points) || typeof projector !== "function") return [];
+		return points
+			.map((point) => projector(point))
+			.filter((point) => point != null);
+	}
+
+	function projectWorldMultiPolygon(polygons, projector) {
+		if (!Array.isArray(polygons) || typeof projector !== "function") return [];
+		return polygons
+			.map((polygon) =>
+				Array.isArray(polygon)
+					? polygon
+						.map((ring) => projectWorldRing(ring, projector))
+						.filter((ring) => ring.length >= 3)
+					: [],
+			)
+			.filter((polygon) => polygon.length > 0);
 	}
 
 	function scheduleRender(reason = "unspecified") {
@@ -1309,46 +1617,85 @@ function createPlanningLiveRenderer({
 		const nextChildren = [];
 		const measurements = [];
 		const projectedShapes = [];
+		const markerMetrics = getZoomAwareMarkerMetrics(effectiveZoom);
+		const projectWorldPoint = (point) =>
+			nativeProjectionAvailable
+				? projectWorldPointViaLeaflet(point, map)
+				: projectWorldPointToOverlay(point, transform, map);
 
 		for (const nation of nations) {
-			const rangePoints = createPlanningCircleVertices(
-				nation.center,
-				nation.rangeRadiusBlocks,
-			)
-				.map((point) =>
-					nativeProjectionAvailable
-						? projectWorldPointViaLeaflet(point, map)
-						: projectWorldPointToOverlay(point, transform, map),
+			const connectivity = getPlanningTownConnectivity(nation);
+			const connectedNation = connectivity.nation ?? nation;
+			const rangePolygon = typeof createPlanningRangeMultiPolygon === "function"
+				? createPlanningRangeMultiPolygon(connectedNation)
+				: [[createPlanningCircleVertices(
+					connectedNation.center,
+					connectedNation.rangeRadiusBlocks,
+				)]];
+			const projectedRangePolygon = projectWorldMultiPolygon(
+				rangePolygon,
+				projectWorldPoint,
+			);
+			const disconnectedRangePolygons = connectivity.disconnectedTowns
+				.map((town) =>
+					projectWorldMultiPolygon(
+						[[createPlanningCircleVertices(town, town.rangeRadiusBlocks)]],
+						projectWorldPoint,
+					),
 				)
-				.filter((point) => point != null);
-			const centerPoints = createPlanningCircleVertices(
-				nation.center,
-				planningCenterRadius,
-			)
-				.map((point) =>
-					nativeProjectionAvailable
-						? projectWorldPointViaLeaflet(point, map)
-						: projectWorldPointToOverlay(point, transform, map),
-				)
-				.filter((point) => point != null);
+				.map((polygon) => polygon?.[0]?.[0] ?? [])
+				.filter((polygon) => polygon.length >= 3);
+			const centerPoint = projectWorldPoint(connectedNation.center);
+			const projectedTownMarkers = (connectedNation.towns ?? [])
+				.map((town) => ({
+					town,
+					centerPoint: projectWorldPoint(town),
+					radiusPx: markerMetrics.townRadiusPx,
+					isDisconnected: connectivity.disconnectedTownIds.has(town.id),
+				}))
+				.filter((townMarker) => townMarker.centerPoint != null);
+			const rangePoints = [
+				...flattenPolygons(projectedRangePolygon),
+				...disconnectedRangePolygons.flatMap((polygon) => flattenPolygons([polygon])),
+			];
 
 			measurements.push({
-				id: nation.id,
-				name: nation.name,
-				center: nation.center,
-				rangeRadiusBlocks: nation.rangeRadiusBlocks,
+				id: connectedNation.id,
+				name: connectedNation.name,
+				center: connectedNation.center,
+				centerLayerPoint: centerPoint,
+				rangeRadiusBlocks: connectedNation.rangeRadiusBlocks,
+				townCount: connectedNation.towns.length,
+				disconnectedTownCount: connectivity.disconnectedTowns.length,
 				rangeBounds: computeBounds(rangePoints),
 			});
 			projectedShapes.push({
-				nation,
-				rangePoints,
-				centerPoints,
+				nation: connectedNation,
+				rangePolygon: projectedRangePolygon,
+				disconnectedRangePolygons,
+				centerMarker: centerPoint == null
+					? null
+					: {
+						centerPoint,
+						radiusPx: markerMetrics.nationRadiusPx,
+						strokePx: markerMetrics.nationStrokePx,
+					},
+				townMarkers: projectedTownMarkers,
 			});
 		}
 
 		const allPoints = projectedShapes.flatMap((shape) => [
-			...shape.rangePoints,
-			...shape.centerPoints,
+			...flattenPolygons(shape.rangePolygon),
+			...shape.disconnectedRangePolygons.flatMap((polygon) =>
+				flattenPolygons([polygon]),
+			),
+			...createBoundsPointsForCircle(
+				shape.centerMarker?.centerPoint,
+				shape.centerMarker?.radiusPx,
+			),
+			...shape.townMarkers.flatMap((townMarker) =>
+				createBoundsPointsForCircle(townMarker.centerPoint, townMarker.radiusPx),
+			),
 		]);
 		const overallBounds = computeBounds(allPoints);
 		if (!overallBounds) {
@@ -1380,40 +1727,101 @@ function createPlanningLiveRenderer({
 		overlay.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
 		for (const shape of projectedShapes) {
-			const rangePath = buildPath(normalizePointsForBounds(shape.rangePoints, origin));
-			const centerPath = buildPath(normalizePointsForBounds(shape.centerPoints, origin));
+			const rangePath = buildMultiPath(
+				normalizePolygonsForBounds(shape.rangePolygon, origin),
+			);
+			const disconnectedRangePaths = shape.disconnectedRangePolygons
+				.map((polygon) =>
+					buildPath(normalizePointsForBounds(polygon, origin)),
+				)
+				.filter(Boolean);
 
 			if (rangePath) {
 				nextChildren.push(
 					createSvgChild("path", {
 						d: rangePath,
 						fill: shape.nation.color,
-						"fill-opacity": "0.2",
+						"fill-opacity": "0.18",
+						"fill-rule": "evenodd",
 						stroke: shape.nation.outlineColor,
-						"stroke-width": "3",
+						"stroke-linejoin": "round",
+						"stroke-width": "2.75",
 						"vector-effect": "non-scaling-stroke",
 						"data-planning-nation-id": shape.nation.id,
 						"data-planning-shape": "range",
 					}),
 				);
 			}
-			if (centerPath) {
+			for (const disconnectedRangePath of disconnectedRangePaths) {
 				nextChildren.push(
 					createSvgChild("path", {
-						d: centerPath,
-						fill: "#fff3cf",
+						d: disconnectedRangePath,
+						fill: DISCONNECTED_RANGE_FILL,
 						"fill-opacity": "0.22",
-						stroke: "#1f1200",
-						"stroke-width": "3",
+						stroke: DISCONNECTED_RANGE_STROKE,
+						"stroke-linejoin": "round",
+						"stroke-width": "2.75",
+						"vector-effect": "non-scaling-stroke",
+						"data-planning-nation-id": shape.nation.id,
+						"data-planning-shape": "disconnected-range",
+					}),
+				);
+			}
+			if (shape.centerMarker?.centerPoint) {
+				const localCenter = normalizePointsForBounds(
+					[shape.centerMarker.centerPoint],
+					origin,
+				)[0];
+				nextChildren.push(
+					createSvgChild("circle", {
+						cx: localCenter.x.toFixed(2),
+						cy: localCenter.y.toFixed(2),
+						r: shape.centerMarker.radiusPx.toFixed(2),
+						fill: NATION_CENTER_FILL,
+						"fill-opacity": "0.98",
+						stroke: NATION_CENTER_STROKE,
+						"stroke-width": shape.centerMarker.strokePx.toFixed(2),
 						"vector-effect": "non-scaling-stroke",
 						"data-planning-nation-id": shape.nation.id,
 						"data-planning-shape": "center",
 					}),
 				);
 			}
+			for (const townMarker of shape.townMarkers) {
+				const localTownCenter = normalizePointsForBounds(
+					[townMarker.centerPoint],
+					origin,
+				)[0];
+				if (!localTownCenter) continue;
+				nextChildren.push(
+					createSvgChild("circle", {
+						cx: localTownCenter.x.toFixed(2),
+						cy: localTownCenter.y.toFixed(2),
+						r: townMarker.radiusPx.toFixed(2),
+						fill: townMarker.isDisconnected
+							? DISCONNECTED_TOWN_FILL
+							: CONNECTED_TOWN_FILL,
+						"fill-opacity": "0.96",
+						stroke: townMarker.isDisconnected
+							? DISCONNECTED_TOWN_STROKE
+							: CONNECTED_TOWN_STROKE,
+						"stroke-width": markerMetrics.townStrokePx.toFixed(2),
+						"data-base-radius": townMarker.radiusPx.toFixed(2),
+						"data-base-stroke-width": markerMetrics.townStrokePx.toFixed(2),
+						"vector-effect": "non-scaling-stroke",
+						"data-planning-nation-id": shape.nation.id,
+						"data-planning-town-id": townMarker.town.id,
+						"data-planning-shape": "town",
+						"data-planning-state": townMarker.isDisconnected
+							? "disconnected"
+							: "connected",
+					}),
+				);
+			}
 		}
 
 		overlay.replaceChildren(...nextChildren);
+		updateHoveredTownVisual();
 		overlay.hidden = false;
 		clearZoomAnimationSync(overlay);
 		lastRenderState = {
@@ -1450,6 +1858,13 @@ function createPlanningLiveRenderer({
 					},
 				},
 			overallBounds,
+			markerMetrics: {
+				nationRadiusPx: safeNumber(markerMetrics.nationRadiusPx, 2),
+				nationStrokePx: safeNumber(markerMetrics.nationStrokePx, 2),
+				townRadiusPx: safeNumber(markerMetrics.townRadiusPx, 2),
+				townStrokePx: safeNumber(markerMetrics.townStrokePx, 2),
+				zoom: safeNumber(markerMetrics.zoom, 2),
+			},
 			nations: measurements,
 		});
 		debugInfo(`${planningLayerPrefix}: rendered live planning overlay`, {
@@ -1468,6 +1883,21 @@ function createPlanningLiveRenderer({
 	function init() {
 		if (!listenersAttached) {
 			document.addEventListener(PLANNING_STATE_UPDATED_EVENT, () => scheduleRender("planning-state-updated"));
+			document.addEventListener(PLANNING_TOWN_HOVER_EVENT, (event) => {
+				try {
+					const detail =
+						typeof event?.detail === "string"
+							? JSON.parse(event.detail)
+							: event?.detail ?? {};
+					hoveredTownId =
+						typeof detail?.townId === "string" && detail.townId
+							? detail.townId
+							: null;
+				} catch {
+					hoveredTownId = null;
+				}
+				updateHoveredTownVisual();
+			});
 			window.addEventListener?.("resize", () => scheduleRender("window-resize"));
 			ensureRootObserver();
 			listenersAttached = true;

@@ -5,6 +5,7 @@
 	if (globalThis[MENU_PLANNING_KEY]) return;
 
 	const PLANNING_PLACEMENT_ARMED_KEY = "emcdynmapplus-planning-placement-armed";
+	const PLANNING_PLACEMENT_MODE_KEY = "emcdynmapplus-planning-placement-mode";
 	const PLANNING_DEBUG_STATE_KEY = "emcdynmapplus-planning-debug-state";
 	const PLANNING_UI_PREFIX = "emcdynmapplus[planning-ui]";
 	const PLANNING_PLACE_EVENT = "EMCDYNMAPPLUS_PLACE_PLANNING_NATION";
@@ -52,20 +53,37 @@
 	const planningState = planningStateFactory();
 	const {
 		defaultPlanningNationRange: DEFAULT_PLANNING_NATION_RANGE,
+		defaultPlanningTownRange: DEFAULT_PLANNING_TOWN_RANGE,
 		defaultPlanningNation: DEFAULT_PLANNING_NATION,
 		loadPlanningNations,
 		savePlanningNations,
 		getPlanningDefaultRange,
 		setPlanningDefaultRange: savePlanningDefaultRange,
+		getPlanningTownConnectivity,
+		isPlanningPointWithinRange,
 		normalizePlanningNation,
+		normalizePlanningTown,
 	} = planningState;
 	const PLANNING_STATE_UPDATED_EVENT =
 		planningRuntimeHelpers.PLANNING_STATE_UPDATED_EVENT;
+	const PLANNING_TOWN_HOVER_EVENT =
+		planningRuntimeHelpers.PLANNING_TOWN_HOVER_EVENT;
+	let planningTownDraft = {
+		rangeRadiusBlocks: String(DEFAULT_PLANNING_TOWN_RANGE),
+	};
+	let planningTownPlacementTargetId = null;
 
 	function notifyPlanningStateUpdated(source, detail = {}) {
 		planningRuntimeHelpers.dispatchPlanningStateUpdated({
 			source,
 			...detail,
+		});
+	}
+
+	function notifyPlanningTownHover(townId = null, trigger = "unknown") {
+		planningRuntimeHelpers.dispatchPlanningTownHover?.({
+			townId: typeof townId === "string" && townId ? townId : null,
+			trigger,
 		});
 	}
 
@@ -88,8 +106,52 @@
 		planningDebugInfo(`${PLANNING_UI_PREFIX}: ${action}`, details);
 	}
 
+	function createPlanningEntityId(prefix = "planning") {
+		if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+			return `${prefix}-${crypto.randomUUID()}`;
+		}
+
+		return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+	}
+
+	function createPlanningTownDraft(overrides = {}) {
+		const normalizedRange = normalizePlanningRange(
+			overrides?.rangeRadiusBlocks ?? DEFAULT_PLANNING_TOWN_RANGE,
+		);
+		return {
+			rangeRadiusBlocks: String(
+				normalizedRange ?? DEFAULT_PLANNING_TOWN_RANGE,
+			),
+		};
+	}
+
+	function getPlanningTownDraftRange() {
+		return (
+			normalizePlanningRange(planningTownDraft?.rangeRadiusBlocks) ??
+			DEFAULT_PLANNING_TOWN_RANGE
+		);
+	}
+
+	function getPlanningPlacementMode() {
+		const storedMode = localStorage[PLANNING_PLACEMENT_MODE_KEY];
+		return storedMode === "nation-center" || storedMode === "town"
+			? storedMode
+			: "none";
+	}
+
+	function getPlanningTownPlacementTarget(
+		activeNation = getHardcodedPlanningNation(),
+	) {
+		if (!activeNation || !planningTownPlacementTargetId) return null;
+		return (
+			(activeNation.towns ?? []).find(
+				(town) => town.id === planningTownPlacementTargetId,
+			) ?? null
+		);
+	}
+
 	function isPlanningPlacementArmed() {
-		return localStorage[PLANNING_PLACEMENT_ARMED_KEY] === "true";
+		return getPlanningPlacementMode() !== "none";
 	}
 
 	function getHardcodedPlanningNation() {
@@ -118,14 +180,53 @@
 		isPlanningPlacementArmed,
 		getHardcodedPlanningNation,
 		getPlanningDefaultRange,
+		getPlanningPreviewSubject: () => {
+			if (getPlanningPlacementMode() === "town") {
+				const activeNation = getHardcodedPlanningNation();
+				const placementTarget = getPlanningTownPlacementTarget(activeNation);
+				return {
+					rangeRadiusBlocks:
+						placementTarget?.rangeRadiusBlocks ?? getPlanningTownDraftRange(),
+					label: placementTarget ? "Reposition Town" : "Add Town",
+				};
+			}
+
+			const activeNation = getHardcodedPlanningNation();
+			return activeNation
+				? {
+					rangeRadiusBlocks: activeNation.rangeRadiusBlocks,
+					label: activeNation.name,
+				}
+				: null;
+		},
 		debugInfo: planningDebugInfo,
 		isDebugLoggingEnabled: isPlanningDebugLoggingEnabled,
 	});
 
-	function setPlanningPlacementArmed(armed) {
+	function setPlanningPlacementMode(mode = "none", options = {}) {
+		const normalizedMode =
+			mode === "nation-center" || mode === "town" ? mode : "none";
+		const armed = normalizedMode !== "none";
+		if (normalizedMode === "town") {
+			planningTownPlacementTargetId =
+				typeof options?.townId === "string" && options.townId
+					? options.townId
+					: null;
+		} else {
+			planningTownPlacementTargetId = null;
+		}
+		localStorage[PLANNING_PLACEMENT_MODE_KEY] = normalizedMode;
 		localStorage[PLANNING_PLACEMENT_ARMED_KEY] = String(armed);
-		setPlanningDebugState("placement armed state updated", { armed });
+		setPlanningDebugState("placement armed state updated", {
+			armed,
+			mode: normalizedMode,
+			townId: planningTownPlacementTargetId,
+		});
 		updatePlanningCursorPreviewState();
+	}
+
+	function setPlanningPlacementArmed(armed) {
+		setPlanningPlacementMode(armed ? "nation-center" : "none");
 	}
 
 	function getPlanningMapWorld() {
@@ -165,6 +266,22 @@
 		return getHardcodedPlanningNation() != null;
 	}
 
+	function canPlacePlanningTown(center, nation, options = {}) {
+		const excludedTownId =
+			typeof options?.excludedTownId === "string" ? options.excludedTownId : null;
+		const scopedNation =
+			excludedTownId == null
+				? nation
+				: {
+					...nation,
+					towns: (nation?.towns ?? []).filter((town) => town.id !== excludedTownId),
+				};
+		const connectivity = getPlanningTownConnectivity(scopedNation);
+		return connectivity.connectedAnchors.some((anchor) =>
+			isPlanningPointWithinRange(center, anchor),
+		);
+	}
+
 	function buildPlanningNation(center) {
 		return {
 			...DEFAULT_PLANNING_NATION,
@@ -173,7 +290,37 @@
 				x: Math.round(center.x),
 				z: Math.round(center.z),
 			},
+			towns: [],
 		};
+	}
+
+	function buildPlanningTown(center, activeNation = getHardcodedPlanningNation()) {
+		return normalizePlanningTown({
+			id: createPlanningEntityId("planning-town"),
+			x: Math.round(center.x),
+			z: Math.round(center.z),
+			rangeRadiusBlocks: getPlanningTownDraftRange(),
+		});
+	}
+
+	function saveSinglePlanningNation(nextNation, source = "unknown") {
+		const normalizedNation = normalizePlanningNation(nextNation);
+		if (!normalizedNation) return null;
+
+		savePlanningNations([normalizedNation]);
+		setPlanningDebugState("stored planning nation", {
+			source,
+			center: normalizedNation.center,
+			rangeRadiusBlocks: normalizedNation.rangeRadiusBlocks,
+			townCount: normalizedNation.towns.length,
+		});
+		notifyPlanningStateUpdated("planning-nations-updated", {
+			center: normalizedNation.center,
+			rangeRadiusBlocks: normalizedNation.rangeRadiusBlocks,
+			towns: normalizedNation.towns,
+			trigger: source,
+		});
+		return normalizedNation;
 	}
 
 	function updatePlanningNationRange(range, source = "unknown") {
@@ -184,12 +331,16 @@
 		}
 
 		const activeNation = getHardcodedPlanningNation();
-		setPlanningDefaultRange(normalizedRange, source, activeNation == null);
-		if (!activeNation) return true;
+		if (!activeNation) {
+			setPlanningDefaultRange(normalizedRange, source, true);
+			return true;
+		}
 
-		savePlanningNations([
-			{ ...activeNation, rangeRadiusBlocks: normalizedRange },
-		]);
+		setPlanningDefaultRange(normalizedRange, source, false);
+		savePlanningNations([{
+			...activeNation,
+			rangeRadiusBlocks: normalizedRange,
+		}]);
 		setPlanningDebugState("updated placed planning range", {
 			source,
 			rangeRadiusBlocks: normalizedRange,
@@ -201,6 +352,48 @@
 			trigger: source,
 		});
 		if (!usePlanningLiveUpdates()) reloadPlanningMapAt(activeNation.center);
+		return true;
+	}
+
+	function updatePlanningTownRange(range, source = "unknown") {
+		const normalizedRange = normalizePlanningRange(range);
+		if (normalizedRange == null) {
+			showAlert("Enter a valid town range in blocks.", 4);
+			return false;
+		}
+
+		planningTownDraft = createPlanningTownDraft({
+			rangeRadiusBlocks: normalizedRange,
+		});
+
+		const activeNation = getHardcodedPlanningNation();
+		if (!activeNation) {
+			notifyPlanningStateUpdated("planning-town-range-updated", {
+				rangeRadiusBlocks: normalizedRange,
+				trigger: source,
+			});
+			return true;
+		}
+
+		const savedNation = saveSinglePlanningNation(
+			{
+				...activeNation,
+				towns: (activeNation.towns ?? []).map((town) => ({
+					...town,
+					rangeRadiusBlocks: normalizedRange,
+				})),
+			},
+			source,
+		);
+		if (!savedNation) return false;
+
+		setPlanningDebugState("updated planning town range", {
+			source,
+			rangeRadiusBlocks: normalizedRange,
+			townCount: savedNation.towns.length,
+			center: savedNation.center,
+		});
+		if (!usePlanningLiveUpdates()) reloadPlanningMapAt(savedNation.center);
 		return true;
 	}
 
@@ -238,7 +431,7 @@
 
 	function removeHardcodedPlanningNation() {
 		const activeNation = getHardcodedPlanningNation();
-		setPlanningPlacementArmed(false);
+		setPlanningPlacementMode("none");
 		savePlanningNations([]);
 		setPlanningDebugState("removed planning nation", {
 			remainingNationCount: loadPlanningNations().length,
@@ -254,20 +447,76 @@
 	}
 
 	function storePlanningNation(center, source = "unknown") {
-		const nation = buildPlanningNation(center);
-		savePlanningNations([nation]);
-		setPlanningPlacementArmed(false);
-		setPlanningDebugState("stored planning nation", {
+		const existingNation = getHardcodedPlanningNation();
+		const nation = existingNation
+			? {
+				...existingNation,
+				center: {
+					x: Math.round(center.x),
+					z: Math.round(center.z),
+				},
+			}
+			: buildPlanningNation(center);
+		return saveSinglePlanningNation(nation, source);
+	}
+
+	function storePlanningTown(center, source = "unknown") {
+		const activeNation = getHardcodedPlanningNation();
+		if (!activeNation) return null;
+		const placementTarget = getPlanningTownPlacementTarget(activeNation);
+		if (
+			!canPlacePlanningTown(center, activeNation, {
+				excludedTownId: placementTarget?.id ?? null,
+			})
+		) {
+			showAlert(
+				"Town centers must be placed within the nation range or a connected town range.",
+				5,
+			);
+			return null;
+		}
+
+		const town = placementTarget
+			? normalizePlanningTown({
+				...placementTarget,
+				x: Math.round(center.x),
+				z: Math.round(center.z),
+			})
+			: buildPlanningTown(center, activeNation);
+		if (!town) return null;
+
+		const nation = {
+			...activeNation,
+			towns: placementTarget
+				? (activeNation.towns ?? []).map((existingTown) =>
+					existingTown.id === placementTarget.id ? town : existingTown,
+				)
+				: [...(activeNation.towns ?? []), town],
+		};
+		const savedNation = saveSinglePlanningNation(nation, source);
+		if (!savedNation) return null;
+		planningTownDraft = createPlanningTownDraft({
+			rangeRadiusBlocks:
+				placementTarget?.rangeRadiusBlocks ?? planningTownDraft.rangeRadiusBlocks,
+		});
+		setPlanningPlacementMode("none");
+
+		setPlanningDebugState("stored planning town", {
 			source,
-			center: nation.center,
-			rangeRadiusBlocks: nation.rangeRadiusBlocks,
+			town: {
+				id: town.id,
+				x: town.x,
+				z: town.z,
+				rangeRadiusBlocks: town.rangeRadiusBlocks,
+			},
+			repositioned: placementTarget != null,
+			center: savedNation.center,
+			townCount: savedNation.towns.length,
 		});
-		notifyPlanningStateUpdated("planning-nations-updated", {
-			center: nation.center,
-			rangeRadiusBlocks: nation.rangeRadiusBlocks,
-			trigger: source,
-		});
-		return nation;
+		return {
+			nation: savedNation,
+			town,
+		};
 	}
 
 	function parsePlanningPlacementEventDetail(detail) {
@@ -284,12 +533,28 @@
 
 	function placeHardcodedPlanningNation(center, source = "unknown") {
 		const nation = storePlanningNation(center, source);
+		if (!nation) return false;
+		setPlanningPlacementMode("none");
 		if (!usePlanningLiveUpdates()) reloadPlanningMapAt(nation.center);
+		return true;
+	}
+
+	function placePlanningTown(center, source = "unknown") {
+		if (!getHardcodedPlanningNation()) {
+			showAlert("Place a nation center before adding towns.", 4);
+			return false;
+		}
+
+		const result = storePlanningTown(center, source);
+		if (!result) return false;
+		if (!usePlanningLiveUpdates()) reloadPlanningMapAt(result.nation.center);
+		return true;
 	}
 
 	function handlePlanningPlacementRequest(center, source = "unknown") {
 		const x = Number(center?.x);
 		const z = Number(center?.z);
+		const placementMode = getPlanningPlacementMode();
 		const coords =
 			Number.isFinite(x) && Number.isFinite(z)
 				? { x: Math.round(x), z: Math.round(z) }
@@ -300,6 +565,7 @@
 				reason: "wrong-map-mode",
 				source,
 				mapMode: getStoredCurrentMapMode(),
+				placementMode,
 				coords,
 			});
 			return false;
@@ -310,6 +576,7 @@
 				reason: "not-armed",
 				source,
 				mapMode: getStoredCurrentMapMode(),
+				placementMode,
 				coords,
 			});
 			return false;
@@ -320,6 +587,7 @@
 				reason: "invalid-coords",
 				source,
 				center,
+				placementMode,
 			});
 			showAlert(
 				"Could not read map coordinates for planning placement. Move the cursor over the map and try again.",
@@ -328,8 +596,11 @@
 			return false;
 		}
 
-		placeHardcodedPlanningNation(coords, source);
-		return true;
+		if (placementMode === "town") {
+			return placePlanningTown(coords, source);
+		}
+
+		return placeHardcodedPlanningNation(coords, source);
 	}
 
 	function handlePlanningPlacementClick(event) {
@@ -392,23 +663,95 @@
 		});
 	}
 
-	function armPlanningPlacement() {
-		setPlanningPlacementArmed(true);
+	function armPlanningPlacement(mode = "nation-center") {
+		setPlanningPlacementMode(mode);
 		ensurePlanningPlacementClickHandler();
+		const activeNation = getHardcodedPlanningNation();
+		const placementTarget = getPlanningTownPlacementTarget(activeNation);
 		showAlert(
-			"Planning placement armed. Click on the live map to place the nation.",
+			mode === "town"
+				? placementTarget
+					? "Town reposition armed. Click on the live map to move the town."
+					: "Town placement armed. Click on the live map to place the town."
+				: "Planning placement armed. Click on the live map to place the nation center.",
 			5,
 		);
 		setPlanningDebugState("placement armed", {
+			mode,
 			existingNationCenter: getHardcodedPlanningNation()?.center ?? null,
+			townId: placementTarget?.id ?? null,
 		});
+	}
+
+	function armPlanningTownPlacement(townId = null) {
+		setPlanningPlacementMode("town", { townId });
+		ensurePlanningPlacementClickHandler();
+		const activeNation = getHardcodedPlanningNation();
+		const placementTarget = getPlanningTownPlacementTarget(activeNation);
+		showAlert(
+			placementTarget
+				? "Town reposition armed. Click on the live map to move the town."
+				: "Town placement armed. Click on the live map to place the town.",
+			5,
+		);
+		setPlanningDebugState("placement armed", {
+			mode: "town",
+			existingNationCenter: activeNation?.center ?? null,
+			townId: placementTarget?.id ?? null,
+		});
+	}
+
+	function updatePlanningTownById(townId, updater, source = "unknown") {
+		const activeNation = getHardcodedPlanningNation();
+		if (!activeNation || typeof updater !== "function") return null;
+
+		const nextTowns = (activeNation.towns ?? [])
+			.map((town, index) => {
+				if (town.id !== townId) return town;
+				return normalizePlanningTown(updater(town), index);
+			})
+			.filter((town) => town != null);
+		const nextNation = {
+			...activeNation,
+			towns: nextTowns,
+		};
+		const savedNation = saveSinglePlanningNation(nextNation, source);
+		if (!savedNation) return null;
+		if (!usePlanningLiveUpdates()) reloadPlanningMapAt(savedNation.center);
+
+		setPlanningDebugState("updated planning town", {
+			source,
+			townId,
+			townCount: savedNation.towns.length,
+		});
+		return savedNation;
+	}
+
+	function removePlanningTownById(townId, source = "unknown") {
+		const activeNation = getHardcodedPlanningNation();
+		if (!activeNation) return null;
+
+		const nextNation = {
+			...activeNation,
+			towns: (activeNation.towns ?? []).filter((town) => town.id !== townId),
+		};
+		const savedNation = saveSinglePlanningNation(nextNation, source);
+		if (!savedNation) return null;
+		if (!usePlanningLiveUpdates()) reloadPlanningMapAt(savedNation.center);
+
+		setPlanningDebugState("removed planning town", {
+			source,
+			townId,
+			townCount: savedNation.towns.length,
+		});
+		return savedNation;
 	}
 
 	function addPlanningSection(sidebar) {
 		const section = addSidebarSection(
 			sidebar,
 			"Planning",
-			"Set the nation range, then place or move the center on the map.",
+			"Set the nation center, add towns, and preview the merged range live on the map.",
 		);
 		section.id = "planning-section";
 		ensurePlanningPlacementClickHandler();
@@ -418,29 +761,41 @@
 		const placedCenter = placedNation?.center ?? null;
 		const activeRange =
 			placedNation?.rangeRadiusBlocks ?? getPlanningDefaultRange();
-
-		const rangeField = addElement(
+		const nationSection = addElement(
 			section,
 			createElement("div", {
-				className: "sidebar-field-group planning-range-control",
+				className: "planning-subsection",
+			}),
+		);
+		addElement(
+			nationSection,
+			createElement("div", {
+				className: "planning-subsection-title",
+				text: "Nation",
+			}),
+		);
+
+		const nationToolbar = addElement(
+			nationSection,
+			createElement("div", {
+				className: "planning-town-toolbar planning-nation-toolbar",
+			}),
+		);
+		const rangeField = addElement(
+			nationToolbar,
+			createElement("label", {
+				className: "planning-town-toolbar-range",
 			}),
 		);
 		addElement(
 			rangeField,
-			createElement("label", {
-				className: "sidebar-field-label",
-				htmlFor: "planning-range-input",
-				text: "Nation range (blocks)",
-			}),
-		);
-		const rangeControls = addElement(
-			rangeField,
-			createElement("div", {
-				className: "planning-range-row",
+			createElement("span", {
+				className: "planning-town-toolbar-label",
+				text: "Range (Blocks)",
 			}),
 		);
 		const rangeInput = addElement(
-			rangeControls,
+			rangeField,
 			createElement("input", {
 				id: "planning-range-input",
 				className: "sidebar-input",
@@ -451,30 +806,6 @@
 					step: "50",
 					inputmode: "numeric",
 				},
-			}),
-		);
-
-		const centerField = addElement(
-			section,
-			createElement("div", {
-				className: "sidebar-field-group",
-			}),
-		);
-		addElement(
-			centerField,
-			createElement("span", {
-				className: "sidebar-field-label",
-				text: "Center",
-			}),
-		);
-		addElement(
-			centerField,
-			createElement("div", {
-				id: "planning-center-label",
-				className: "planning-chip-value",
-				text: placedCenter
-					? `X ${placedCenter.x} Z ${placedCenter.z}`
-					: "Not set",
 			}),
 		);
 
@@ -493,6 +824,7 @@
 				showAlert("Saved range for the next nation placement.", 4);
 			}
 		};
+		rangeInput.addEventListener("input", () => updatePlanningCursorPreviewVisual());
 		rangeInput.addEventListener("change", applyPlanningRangeFromInput);
 		rangeInput.addEventListener("blur", applyPlanningRangeFromInput);
 		rangeInput.addEventListener("keyup", (event) => {
@@ -500,79 +832,358 @@
 			applyPlanningRangeFromInput();
 		});
 
-		const actionRow = addElement(
-			section,
-			createElement("div", { className: "planning-actions-grid" }),
-		);
 		const createNationButton = addElement(
-			actionRow,
+			nationToolbar,
 			createElement("button", {
 				className: "sidebar-button sidebar-button-primary",
 				id: "planning-place-button",
-				text: isPlanningPlacementArmed()
-					? "Click Map To Place"
+				text: getPlanningPlacementMode() === "nation-center"
+					? "Click Map"
 					: placedNation
 						? "Reposition Nation"
-						: "Place Nation On Map",
+						: "Add Nation",
+				type: "button",
+			}),
+		);
+		const removeNationButton = addElement(
+			nationToolbar,
+			createElement("button", {
+				className: "planning-town-icon-button planning-nation-icon-button",
+				id: "planning-remove-button",
+				text: "x",
+				type: "button",
+				attrs: {
+					title: "Remove nation",
+				},
+			}),
+		);
+		removeNationButton.disabled = !placedNation;
+		removeNationButton.addEventListener("click", () => {
+			if (!hasHardcodedPlanningNation()) return;
+			removeHardcodedPlanningNation();
+		});
+		const centerField = addElement(
+			nationSection,
+			createElement("div", {
+				id: "planning-center-label",
+				className: "planning-section-meta planning-center-meta",
+				text: placedCenter
+					? `Center X ${placedCenter.x} Z ${placedCenter.z}`
+					: "Center not set",
+			}),
+		);
+
+		const townSection = addElement(
+			section,
+			createElement("div", {
+				className: "planning-subsection planning-subsection-towns",
+			}),
+		);
+		const townSectionHeader = addElement(
+			townSection,
+			createElement("div", {
+				className: "planning-subsection-header",
+			}),
+		);
+		addElement(
+			townSectionHeader,
+			createElement("div", {
+				className: "planning-subsection-title",
+				text: "Towns",
+			}),
+		);
+		addElement(
+			townSectionHeader,
+			createElement("div", {
+				id: "planning-town-count-label",
+				className: "planning-section-meta",
+				text: `${placedNation?.towns?.length ?? 0} total`,
+			}),
+		);
+		const townToolbar = addElement(
+			townSection,
+			createElement("div", {
+				className: "planning-town-toolbar",
+			}),
+		);
+		const townRangeField = addElement(
+			townToolbar,
+			createElement("label", {
+				className: "planning-town-toolbar-range",
+			}),
+		);
+		addElement(
+			townRangeField,
+			createElement("span", {
+				className: "planning-town-toolbar-label",
+				text: "Town Range (Blocks)",
+			}),
+		);
+		const townRangeInput = addElement(
+			townRangeField,
+			createElement("input", {
+				id: "planning-town-range-input",
+				className: "sidebar-input",
+				type: "number",
+				value: planningTownDraft.rangeRadiusBlocks,
+				attrs: {
+					min: "0",
+					step: "50",
+					inputmode: "numeric",
+				},
+			}),
+		);
+		const placeTownButton = addElement(
+			townToolbar,
+			createElement("button", {
+				className: "sidebar-button sidebar-button-primary",
+				id: "planning-place-town-button",
+				text: "Add Town",
 				type: "button",
 			}),
 		);
 
-		const removeNationButton = addElement(
-			actionRow,
-			createElement("button", {
-				className:
-					"sidebar-button sidebar-button-secondary sidebar-button-danger",
-				id: "planning-remove-button",
-				text:
-					isPlanningPlacementArmed() && !placedNation
-						? "Cancel Placement"
-						: "Remove Nation",
-				type: "button",
+		addElement(
+			townSection,
+			createElement("p", {
+				id: "planning-town-helper",
+				className: "sidebar-help planning-inline-note",
+				text: placedNation
+					? "Add a town or move an existing one."
+					: "Place a nation center first, then add towns.",
 			}),
 		);
-		removeNationButton.disabled = !placedNation && !isPlanningPlacementArmed();
-		removeNationButton.addEventListener("click", () => {
-			if (isPlanningPlacementArmed() && !hasHardcodedPlanningNation()) {
-				setPlanningPlacementArmed(false);
-				syncPlanningSectionState();
+		const townList = addElement(
+			townSection,
+			createElement("div", {
+				id: "planning-town-list",
+				className: "planning-town-list",
+			}),
+		);
+
+		function commitPlanningTownDraftRange(resetOnInvalid = false) {
+			if (
+				!updatePlanningTownRange(
+					townRangeInput.value,
+					"planning-town-range-input",
+				)
+			) {
+				if (resetOnInvalid) {
+					townRangeInput.value = String(getPlanningTownDraftRange());
+				}
+				return false;
+			}
+			townRangeInput.value = planningTownDraft.rangeRadiusBlocks;
+			updatePlanningCursorPreviewVisual();
+			return true;
+		}
+
+		townRangeInput.addEventListener("input", () => {
+			planningTownDraft = {
+				...planningTownDraft,
+				rangeRadiusBlocks: townRangeInput.value,
+			};
+			updatePlanningCursorPreviewVisual();
+		});
+		townRangeInput.addEventListener("change", () =>
+			commitPlanningTownDraftRange(true),
+		);
+		townRangeInput.addEventListener("blur", () =>
+			commitPlanningTownDraftRange(true),
+		);
+		townRangeInput.addEventListener("keyup", (event) => {
+			if (event.key !== "Enter") return;
+			commitPlanningTownDraftRange(true);
+		});
+
+		function renderTownList(activeNation) {
+			townList.replaceChildren();
+			if (!activeNation || !Array.isArray(activeNation.towns) || activeNation.towns.length === 0) {
+				addElement(
+					townList,
+					createElement("p", {
+						className: "sidebar-help planning-inline-note",
+						text: "No towns yet. Place one on the map to extend the nation chain.",
+					}),
+				);
 				return;
 			}
 
-			removeHardcodedPlanningNation();
-		});
+			const connectivity = getPlanningTownConnectivity(activeNation);
 
-		addElement(
-			section,
-			createElement("p", {
-				className: "sidebar-help",
-				text: "Click place, then click the live map to set the center.",
-			}),
-		);
+			for (const [index, town] of activeNation.towns.entries()) {
+				const isDisconnected = connectivity.disconnectedTownIds.has(town.id);
+				const townRow = addElement(
+					townList,
+					createElement("div", {
+						className: "planning-town-row",
+						attrs: {
+							...(isDisconnected
+								? {
+									"data-state": "disconnected",
+								}
+								: {}),
+							...(planningTownPlacementTargetId === town.id
+								? {
+									"data-active": "true",
+								}
+								: {}),
+							title: isDisconnected
+								? `Disconnected town at X ${town.x} Z ${town.z}`
+								: `Connected town at X ${town.x} Z ${town.z}`,
+						},
+					}),
+				);
+				townRow.addEventListener("mouseenter", () => {
+					townRow.setAttribute("data-hovered", "true");
+					notifyPlanningTownHover(town.id, "town-row-hover");
+				});
+				townRow.addEventListener("mouseleave", () => {
+					townRow.removeAttribute("data-hovered");
+					notifyPlanningTownHover(null, "town-row-leave");
+				});
+				townRow.addEventListener("focusin", () => {
+					townRow.setAttribute("data-hovered", "true");
+					notifyPlanningTownHover(town.id, "town-row-focus");
+				});
+				townRow.addEventListener("focusout", () => {
+					townRow.removeAttribute("data-hovered");
+					notifyPlanningTownHover(null, "town-row-blur");
+				});
+				addElement(
+					townRow,
+					createElement("div", {
+						className: "planning-town-row-label",
+						text: `T${index + 1}`,
+					}),
+				);
+				addElement(
+					townRow,
+					createElement("div", {
+						className: "planning-town-row-coords",
+						text: `X ${town.x}  Z ${town.z}`,
+					}),
+				);
+				addElement(
+					townRow,
+					createElement("div", {
+						className: "planning-town-row-status",
+						text: isDisconnected ? "!" : "●",
+						attrs: {
+							title: isDisconnected ? "Disconnected" : "Connected",
+						},
+					}),
+				);
+				const townActions = addElement(
+					townRow,
+					createElement("div", {
+						className: "planning-town-row-actions",
+					}),
+				);
+				const repositionTownButton = addElement(
+					townActions,
+					createElement("button", {
+						className: "planning-town-icon-button",
+						text:
+							getPlanningPlacementMode() === "town" &&
+							planningTownPlacementTargetId === town.id
+								? "*"
+								: "<>",
+						type: "button",
+						attrs: {
+							title:
+								getPlanningPlacementMode() === "town" &&
+								planningTownPlacementTargetId === town.id
+									? "Reposition armed"
+									: "Reposition town",
+						},
+					}),
+				);
+				repositionTownButton.addEventListener("click", () => {
+					if (
+						getPlanningPlacementMode() === "town" &&
+						planningTownPlacementTargetId === town.id
+					) {
+						setPlanningPlacementMode("none");
+					} else {
+						armPlanningTownPlacement(town.id);
+					}
+					syncPlanningSectionState();
+				});
+				const removeTownButton = addElement(
+					townActions,
+					createElement("button", {
+						className: "planning-town-icon-button",
+						text: "x",
+						type: "button",
+						attrs: {
+							title: "Remove town",
+						},
+					}),
+				);
+				removeTownButton.addEventListener("click", () => {
+					removePlanningTownById(town.id, "planning-town-remove");
+					syncPlanningSectionState();
+				});
+			}
+		}
 
 		const syncPlanningSectionState = () => {
 			const activeNation = getHardcodedPlanningNation();
-			const isArmed = isPlanningPlacementArmed();
+			const placementMode = getPlanningPlacementMode();
+			const isArmed = placementMode !== "none";
 			const center = activeNation?.center ?? null;
 			const currentRange =
 				activeNation?.rangeRadiusBlocks ?? getPlanningDefaultRange();
 			section.querySelector("#planning-center-label").textContent = center
-				? `X ${center.x} Z ${center.z}`
-				: "Not set";
+				? `Center X ${center.x} Z ${center.z}`
+				: "Center not set";
 			rangeInput.value = String(currentRange);
-			createNationButton.textContent = isArmed
-				? "Click Map To Place"
+			createNationButton.textContent = placementMode === "nation-center"
+				? "Click Map"
 				: activeNation
 					? "Reposition Nation"
-					: "Place Nation On Map";
-			removeNationButton.textContent =
-				isArmed && !activeNation ? "Cancel Placement" : "Remove Nation";
-			removeNationButton.disabled = !activeNation && !isArmed;
+					: "Add Nation";
+			placeTownButton.textContent = placementMode === "town" &&
+				planningTownPlacementTargetId == null
+				? "Click Map"
+				: "Add Town";
+			removeNationButton.disabled = !activeNation;
+			placeTownButton.disabled = !activeNation;
+			townRangeInput.value = planningTownDraft.rangeRadiusBlocks;
+			section.querySelector("#planning-town-count-label").textContent =
+				`${activeNation?.towns?.length ?? 0} total`;
+			section.querySelector("#planning-town-helper").textContent =
+				!activeNation
+					? "Place a nation center first, then add towns."
+					: placementMode === "town" && planningTownPlacementTargetId
+						? "Click the map to reposition the selected town."
+						: placementMode === "town"
+							? "Click the map to add a new town."
+							: "Add a town or move an existing one.";
+			renderTownList(activeNation);
 			updatePlanningCursorPreviewState();
 		};
 
 		createNationButton.addEventListener("click", () => {
-			armPlanningPlacement();
+			if (getPlanningPlacementMode() === "nation-center") {
+				setPlanningPlacementMode("none");
+			} else {
+				armPlanningPlacement("nation-center");
+			}
+			syncPlanningSectionState();
+		});
+		placeTownButton.addEventListener("click", () => {
+			if (!getHardcodedPlanningNation()) {
+				showAlert("Place a nation center before adding towns.", 4);
+				return;
+			}
+			if (!commitPlanningTownDraftRange(true)) return;
+			if (getPlanningPlacementMode() === "town" && planningTownPlacementTargetId == null) {
+				setPlanningPlacementMode("none");
+			} else {
+				armPlanningTownPlacement();
+			}
 			syncPlanningSectionState();
 		});
 		document.addEventListener(PLANNING_STATE_UPDATED_EVENT, () =>

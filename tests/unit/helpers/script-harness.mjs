@@ -470,6 +470,18 @@ export function createScriptContext({
 	}
 	FakeDate.__now = now;
 
+	const contextSetTimeout = (callback, delay, ...args) => {
+		const handle = setTimeout(callback, delay, ...args);
+		handle?.unref?.();
+		return handle;
+	};
+
+	const contextSetInterval = (callback, delay, ...args) => {
+		const handle = setInterval(callback, delay, ...args);
+		handle?.unref?.();
+		return handle;
+	};
+
 	const context = {
 		console,
 		JSON,
@@ -492,9 +504,9 @@ export function createScriptContext({
 		structuredClone,
 		performance,
 		Date: FakeDate,
-		setTimeout,
+		setTimeout: contextSetTimeout,
 		clearTimeout,
-		setInterval,
+		setInterval: contextSetInterval,
 		clearInterval,
 		queueMicrotask,
 		document,
@@ -553,7 +565,7 @@ export function createScriptContext({
 			};
 		},
 		requestAnimationFrame(callback) {
-			return setTimeout(() => callback(FakeDate.now()), 0);
+			return contextSetTimeout(() => callback(FakeDate.now()), 0);
 		},
 		cancelAnimationFrame(handle) {
 			clearTimeout(handle);

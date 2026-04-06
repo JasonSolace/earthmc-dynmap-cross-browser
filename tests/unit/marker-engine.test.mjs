@@ -8,6 +8,7 @@ const normalize = (value) => JSON.parse(JSON.stringify(value));
 function loadMarkerEngine(options = {}) {
 	return loadIifeScripts(
 		[
+			"resources/polygon-clipping.umd.min.js",
 			"resources/planning-leaflet-adapter.js",
 			"resources/planning-state.js",
 			"resources/planning-runtime.js",
@@ -178,6 +179,19 @@ test("marker engine appends a sanitized planning layer from stored nations", () 
 					color: "#123456",
 					outlineColor: "#abcdef",
 					rangeRadiusBlocks: "4096.8",
+					towns: [
+						{
+							name: "Town One",
+							x: 100.2,
+							z: 200.7,
+							rangeRadiusBlocks: "1100.3",
+						},
+						{
+							name: "Broken Town",
+							x: "bad",
+							z: 0,
+						},
+					],
 				},
 				{
 					name: "Invalid Nation",
@@ -203,10 +217,58 @@ test("marker engine appends a sanitized planning layer from stored nations", () 
 	assert.equal(result.length, 2);
 	const planningLayer = result.find((layer) => layer.id === "planning-nations");
 	assert.ok(planningLayer);
-	assert.equal(planningLayer.markers.length, 2);
+	assert.equal(planningLayer.markers.length, 3);
 	assert.match(planningLayer.markers[0].popup, /X: 13/);
 	assert.match(planningLayer.markers[0].popup, /Z: -8/);
 	assert.match(planningLayer.markers[0].popup, /Range: 4097 blocks/);
+	assert.match(planningLayer.markers[0].popup, /Connected towns: 1/);
+	assert.match(planningLayer.markers[2].popup, /Status: Connected/);
+	assert.match(planningLayer.markers[2].popup, /X: 100/);
+});
+
+test("marker engine renders disconnected planning town coverage separately", () => {
+	const { exports } = loadMarkerEngine({
+		localStorageSeed: {
+			"emcdynmapplus-planner-nations": JSON.stringify([
+				{
+					name: "Chain Nation",
+					center: { x: 0, z: 0 },
+					rangeRadiusBlocks: 5000,
+					towns: [
+						{
+							x: 5000,
+							z: 0,
+							rangeRadiusBlocks: 500,
+						},
+						{
+							x: 6500,
+							z: 0,
+							rangeRadiusBlocks: 1500,
+						},
+					],
+				},
+			]),
+		},
+	});
+
+	const result = exports.addPlanningLayer([
+		{
+			id: "planning-nations",
+			name: "Planning Nations",
+			markers: [],
+		},
+	]);
+
+	const planningLayer = result.find((layer) => layer.id === "planning-nations");
+	assert.ok(planningLayer);
+	assert.equal(
+		planningLayer.markers.some(
+			(marker) =>
+				marker.fillColor === "#c44f45" &&
+				/Disconnected Town Coverage/.test(marker.popup ?? ""),
+		),
+		true,
+	);
 });
 
 test("marker engine appends separate country and state border layers", async () => {

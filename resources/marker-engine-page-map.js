@@ -597,6 +597,11 @@ function createMarkerEnginePageMap({
 
 		let attempts = 0;
 		const maxAttempts = 80;
+		const schedulePoll = (callback, delayMs) => {
+			const timer = setTimeout(callback, delayMs);
+			timer?.unref?.();
+			return timer;
+		};
 		const poll = () => {
 			attempts += 1;
 			const mapPatched = patchLeafletMapCreation();
@@ -618,7 +623,7 @@ function createMarkerEnginePageMap({
 				return;
 			}
 
-			setTimeout(poll, 250);
+			schedulePoll(poll, 250);
 		};
 
 		poll();

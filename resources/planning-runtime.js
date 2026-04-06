@@ -3,6 +3,7 @@ const PLANNING_RUNTIME_KEY = "__EMCDYNMAPPLUS_PLANNING_RUNTIME__";
 if (globalThis[PLANNING_RUNTIME_KEY]) return;
 
 const PLANNING_STATE_UPDATED_EVENT = "EMCDYNMAPPLUS_PLANNING_STATE_UPDATED";
+const PLANNING_TOWN_HOVER_EVENT = "EMCDYNMAPPLUS_PLANNING_TOWN_HOVER";
 
 function cloneSerializable(value) {
 	if (typeof value === "undefined") return undefined;
@@ -38,6 +39,20 @@ function dispatchPlanningStateUpdated(detail = {}) {
 
 	globalThis.document.dispatchEvent(
 		new globalThis.CustomEvent(PLANNING_STATE_UPDATED_EVENT, {
+			detail: JSON.stringify(payload),
+		}),
+	);
+	return true;
+}
+
+function dispatchPlanningTownHover(detail = {}) {
+	if (!globalThis.document?.dispatchEvent || typeof globalThis.CustomEvent !== "function") {
+		return false;
+	}
+	const payload = cloneSerializable(detail) ?? {};
+
+	globalThis.document.dispatchEvent(
+		new globalThis.CustomEvent(PLANNING_TOWN_HOVER_EVENT, {
 			detail: JSON.stringify(payload),
 		}),
 	);
@@ -112,6 +127,7 @@ function createPlanningRuntime({
 
 	return {
 		PLANNING_STATE_UPDATED_EVENT,
+		PLANNING_TOWN_HOVER_EVENT,
 		init,
 		syncFromStorage,
 		getSnapshot,
@@ -122,7 +138,9 @@ function createPlanningRuntime({
 
 globalThis[PLANNING_RUNTIME_KEY] = Object.freeze({
 	PLANNING_STATE_UPDATED_EVENT,
+	PLANNING_TOWN_HOVER_EVENT,
 	dispatchPlanningStateUpdated,
+	dispatchPlanningTownHover,
 	createPlanningRuntime,
 });
 })();

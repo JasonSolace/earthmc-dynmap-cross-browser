@@ -26,6 +26,7 @@
 				"resources/borders.aurora.json",
 				"resources/borders.nostra.countries.json",
 				"resources/borders.nostra.states-and-countries.json",
+				"resources/polygon-clipping.umd.min.js",
 				"resources/planning-leaflet-adapter.js",
 				"resources/planning-state.js",
 				"resources/planning-runtime.js",

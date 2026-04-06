@@ -481,6 +481,37 @@ select {
 	gap: 8px;
 }
 
+.planning-secondary-actions {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 8px;
+}
+
+.planning-subsection {
+	display: grid;
+	gap: 8px;
+}
+
+.planning-subsection-header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.planning-subsection-title {
+	font-size: 11px;
+	font-weight: 800;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+
+.planning-section-meta {
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
 .planning-range-control {
 	display: grid;
 	gap: 6px;
@@ -583,6 +614,159 @@ select {
 
 .planning-inline-note {
 	margin: 0;
+}
+
+.planning-town-header {
+	display: grid;
+	gap: 4px;
+}
+
+.planning-town-header-copy {
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.planning-town-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 6px 8px;
+}
+
+.planning-town-field {
+	display: grid;
+	gap: 3px;
+	min-width: 0;
+}
+
+.planning-town-field-label {
+	font-size: 11px;
+	font-weight: 800;
+	letter-spacing: 0.04em;
+	color: var(--text-muted);
+}
+
+.planning-town-list {
+	display: grid;
+	gap: 1px;
+	font-family: "Consolas", "SFMono-Regular", "Cascadia Mono", monospace;
+}
+
+.planning-town-row {
+	display: grid;
+	grid-template-columns: 28px minmax(0, 1fr) 22px 72px;
+	align-items: center;
+	justify-content: start;
+	gap: 8px;
+	padding: 2px 0;
+	font-size: 12px;
+	line-height: 1.35;
+	border: 0;
+	background: transparent;
+	border-radius: 4px;
+}
+
+.planning-town-row:hover,
+.planning-town-row:focus-within {
+	color: var(--text-strong);
+	background: rgba(209, 137, 45, 0.08);
+}
+
+.planning-town-row-label {
+	min-width: 28px;
+	font-weight: 700;
+	color: var(--text-muted);
+}
+
+.planning-town-row-coords {
+	min-width: 0;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.planning-town-row-status {
+	width: 22px;
+	text-align: center;
+	font-weight: 800;
+	color: var(--success-color);
+	font-size: 15px;
+}
+
+.planning-town-row[data-state="disconnected"] .planning-town-row-status {
+	color: var(--danger-color);
+}
+
+.planning-town-row[data-active="true"] {
+	color: var(--accent-strong);
+}
+
+.planning-town-row[data-hovered="true"] {
+	background: rgba(209, 137, 45, 0.12);
+}
+
+.planning-town-row-actions {
+	display: grid;
+	grid-template-columns: repeat(2, 34px);
+	gap: 4px;
+	width: 72px;
+	justify-content: end;
+}
+
+.planning-town-icon-button {
+	appearance: none;
+	border: 0;
+	background: transparent;
+	padding: 0 2px;
+	min-width: 34px;
+	min-height: auto;
+	color: var(--text-muted);
+	font: inherit;
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+	line-height: 1;
+	cursor: pointer;
+	text-align: center;
+	text-transform: uppercase;
+}
+
+.planning-town-icon-button:hover,
+.planning-town-icon-button:focus-visible {
+	color: var(--accent-strong);
+	outline: none;
+}
+
+.planning-town-toolbar {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: end;
+	gap: 8px;
+}
+
+.planning-town-toolbar-range {
+	display: grid;
+	gap: 3px;
+}
+
+.planning-town-toolbar-label {
+	font-size: 11px;
+	font-weight: 800;
+	letter-spacing: 0.04em;
+	color: var(--text-muted);
+}
+
+.planning-nation-toolbar {
+	grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.planning-center-meta {
+	margin-top: -2px;
+}
+
+.planning-nation-icon-button {
+	align-self: end;
+	padding: 0 2px 8px;
 }
 
 .sidebar-split {
@@ -1246,7 +1430,10 @@ div.leaflet-control-layers.screenshot img {
 	}
 
 	.sidebar-action-row,
-	.player-lookup-stats {
+	.player-lookup-stats,
+	.planning-town-grid,
+	.planning-town-toolbar,
+	.planning-nation-toolbar {
 		grid-template-columns: 1fr;
 	}
 
