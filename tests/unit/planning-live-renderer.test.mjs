@@ -372,12 +372,128 @@ test("planning live renderer highlights hovered towns from the sidebar", () => {
 		(child) => child.id === "emcdynmapplus-planning-live-overlay",
 	);
 	assert.ok(overlay);
+	const townCircle = overlay.children.find(
+		(child) =>
+			child.getAttribute?.("data-planning-town-id") === "town-1" &&
+			child.getAttribute?.("data-planning-shape") === "town",
+	);
+	assert.ok(townCircle);
+	const townRangeHighlight = overlay.children.find(
+		(child) =>
+			child.getAttribute?.("data-planning-town-id") === "town-1" &&
+			child.getAttribute?.("data-planning-shape") === "town-range-highlight",
+	);
+	assert.ok(townRangeHighlight);
 	assert.equal(
 		overlay.children.some(
 			(child) =>
 				child.getAttribute?.("data-planning-town-id") === "town-1" &&
 				child.getAttribute?.("data-hovered") === "true",
 		),
+		true,
+	);
+	assert.equal(townCircle.getAttribute("fill-opacity"), "1");
+	assert.equal(townRangeHighlight.getAttribute("fill"), "#e3a24b");
+	assert.equal(townRangeHighlight.getAttribute("stroke"), "#fff3cf");
+	assert.equal(townRangeHighlight.getAttribute("fill-opacity"), "0.24");
+	assert.equal(townRangeHighlight.getAttribute("stroke-width"), "3.25");
+
+	document.dispatchEvent(
+		new context.CustomEvent("EMCDYNMAPPLUS_PLANNING_TOWN_HOVER", {
+			detail: JSON.stringify({
+				townId: null,
+			}),
+		}),
+	);
+
+	assert.equal(townCircle.getAttribute("data-hovered"), null);
+	assert.equal(townCircle.getAttribute("fill-opacity"), "0.96");
+	assert.equal(townRangeHighlight.getAttribute("data-hovered"), null);
+	assert.equal(townRangeHighlight.getAttribute("fill-opacity"), "0");
+	assert.equal(townRangeHighlight.getAttribute("stroke-opacity"), "0");
+	assert.equal(townRangeHighlight.getAttribute("stroke-width"), "0");
+});
+
+test("planning live renderer renders town labels in sidebar order", () => {
+	const { exports, document } = loadPlanningLiveRenderer();
+	const mapContainer = document.createElement("div");
+	mapContainer.setBoundingClientRect({
+		left: 0,
+		top: 0,
+		width: 800,
+		height: 600,
+		right: 800,
+		bottom: 600,
+	});
+	document.__setQuery(".leaflet-container", mapContainer);
+
+	const renderer = exports.createPlanningLiveRenderer({
+		createPlanningCircleVertices(point, radiusBlocks) {
+			return [
+				{ x: point.x - radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z - radiusBlocks },
+				{ x: point.x + radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z + radiusBlocks },
+			];
+		},
+		getPlanningNations: () => [
+			{
+				id: "nation-1",
+				name: "Nation 1",
+				center: { x: 0, z: 0 },
+				rangeRadiusBlocks: 5000,
+				towns: [
+					{
+						id: "town-1",
+						x: 2500,
+						z: 0,
+						rangeRadiusBlocks: 1500,
+					},
+					{
+						id: "town-2",
+						x: 4000,
+						z: 0,
+						rangeRadiusBlocks: 1500,
+					},
+				],
+			},
+		],
+		getPrimaryLeafletMap: () => ({
+			getContainer: () => mapContainer,
+			on() {},
+		}),
+		sampleWorldPoint(clientX, clientY) {
+			return {
+				x: Math.round(clientX),
+				z: Math.round(clientY),
+			};
+		},
+	});
+
+	renderer.render();
+
+	const overlay = mapContainer.children.find(
+		(child) => child.id === "emcdynmapplus-planning-live-overlay",
+	);
+	assert.ok(overlay);
+
+	const townLabels = overlay.children.filter(
+		(child) => child.getAttribute?.("data-planning-shape") === "town-label",
+	);
+	assert.equal(townLabels.length, 2);
+	assert.deepEqual(
+		townLabels.map((child) => child.textContent),
+		["T1", "T2"],
+	);
+
+	const firstTownCircle = overlay.children.find(
+		(child) =>
+			child.getAttribute?.("data-planning-town-id") === "town-1" &&
+			child.getAttribute?.("data-planning-shape") === "town",
+	);
+	assert.ok(firstTownCircle);
+	assert.equal(
+		Number(townLabels[0].getAttribute("y")) < Number(firstTownCircle.getAttribute("cy")),
 		true,
 	);
 });

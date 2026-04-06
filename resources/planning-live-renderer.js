@@ -21,8 +21,20 @@ const CONNECTED_TOWN_FILL = "#c9782c";
 const CONNECTED_TOWN_STROKE = "#ffe0b4";
 const DISCONNECTED_TOWN_FILL = "#b53f34";
 const DISCONNECTED_TOWN_STROKE = "#ffd2cd";
+const CONNECTED_TOWN_RANGE_HOVER_FILL = "#e3a24b";
+const CONNECTED_TOWN_RANGE_HOVER_STROKE = "#fff3cf";
+const DISCONNECTED_TOWN_RANGE_HOVER_FILL = "#d45d52";
+const DISCONNECTED_TOWN_RANGE_HOVER_STROKE = "#ffe3df";
 const NATION_CENTER_FILL = "#d98936";
 const NATION_CENTER_STROKE = "#fff3cf";
+const TOWN_LABEL_FONT_SIZE_PX = 11;
+const TOWN_LABEL_HEIGHT_PX = 18;
+const TOWN_LABEL_HORIZONTAL_PADDING_PX = 6;
+const TOWN_LABEL_VERTICAL_OFFSET_PX = 8;
+const TOWN_LABEL_MIN_WIDTH_PX = 22;
+const TOWN_LABEL_BG_FILL = "#1f1b15";
+const TOWN_LABEL_BG_STROKE = "#fff3cf";
+const TOWN_LABEL_TEXT_FILL = "#fff3cf";
 
 function createPlanningLiveRenderer({
 	planningLayerPrefix = "emcdynmapplus[planning-layer]",
@@ -705,31 +717,61 @@ function createPlanningLiveRenderer({
 		const overlay = getOverlayElement(getMapContainer());
 		if (!(overlay instanceof Element)) return;
 		for (const child of overlay.children ?? []) {
-			if (child?.getAttribute?.("data-planning-shape") !== "town") continue;
+			const shape = child?.getAttribute?.("data-planning-shape");
+			if (shape !== "town" && shape !== "town-range-highlight") continue;
 			const townId = child.getAttribute("data-planning-town-id");
-			const baseRadius = Number(child.getAttribute("data-base-radius"));
-			const baseStrokeWidth = Number(child.getAttribute("data-base-stroke-width"));
 			const isHovered =
 				typeof townId === "string" && townId && townId === hoveredTownId;
-			if (isHovered) {
-				child.setAttribute("r", String((baseRadius + 1.35).toFixed(2)));
-				child.setAttribute(
-					"stroke-width",
-					String((baseStrokeWidth + 0.85).toFixed(2)),
-				);
-				child.setAttribute("fill-opacity", "1");
-				child.setAttribute("data-hovered", "true");
-			} else {
-				if (Number.isFinite(baseRadius)) {
-					child.setAttribute("r", String(baseRadius.toFixed(2)));
-				}
-				if (Number.isFinite(baseStrokeWidth)) {
+			if (shape === "town") {
+				const baseRadius = Number(child.getAttribute("data-base-radius"));
+				const baseStrokeWidth = Number(child.getAttribute("data-base-stroke-width"));
+				if (isHovered) {
+					child.setAttribute("r", String((baseRadius + 1.35).toFixed(2)));
 					child.setAttribute(
 						"stroke-width",
-						String(baseStrokeWidth.toFixed(2)),
+						String((baseStrokeWidth + 0.85).toFixed(2)),
 					);
+					child.setAttribute("fill-opacity", "1");
+					child.setAttribute("data-hovered", "true");
+				} else {
+					if (Number.isFinite(baseRadius)) {
+						child.setAttribute("r", String(baseRadius.toFixed(2)));
+					}
+					if (Number.isFinite(baseStrokeWidth)) {
+						child.setAttribute(
+							"stroke-width",
+							String(baseStrokeWidth.toFixed(2)),
+						);
+					}
+					child.setAttribute("fill-opacity", "0.96");
+					child.removeAttribute("data-hovered");
 				}
-				child.setAttribute("fill-opacity", "0.96");
+				continue;
+			}
+
+			const isDisconnected =
+				child.getAttribute("data-planning-state") === "disconnected";
+			if (isHovered) {
+				child.setAttribute(
+					"fill",
+					isDisconnected
+						? DISCONNECTED_TOWN_RANGE_HOVER_FILL
+						: CONNECTED_TOWN_RANGE_HOVER_FILL,
+				);
+				child.setAttribute(
+					"stroke",
+					isDisconnected
+						? DISCONNECTED_TOWN_RANGE_HOVER_STROKE
+						: CONNECTED_TOWN_RANGE_HOVER_STROKE,
+				);
+				child.setAttribute("fill-opacity", isDisconnected ? "0.28" : "0.24");
+				child.setAttribute("stroke-opacity", "1");
+				child.setAttribute("stroke-width", "3.25");
+				child.setAttribute("data-hovered", "true");
+			} else {
+				child.setAttribute("fill-opacity", "0");
+				child.setAttribute("stroke-opacity", "0");
+				child.setAttribute("stroke-width", "0");
 				child.removeAttribute("data-hovered");
 			}
 		}
@@ -1118,6 +1160,71 @@ function createPlanningLiveRenderer({
 			{ x, y: y - radius },
 			{ x, y: y + radius },
 		];
+	}
+
+	function createBoundsPointsForRect(bounds) {
+		const left = Number(bounds?.left);
+		const top = Number(bounds?.top);
+		const width = Number(bounds?.width);
+		const height = Number(bounds?.height);
+		if (
+			!Number.isFinite(left) ||
+			!Number.isFinite(top) ||
+			!Number.isFinite(width) ||
+			!Number.isFinite(height)
+		) {
+			return [];
+		}
+
+		return [
+			{ x: left, y: top },
+			{ x: left + width, y: top },
+			{ x: left, y: top + height },
+			{ x: left + width, y: top + height },
+		];
+	}
+
+	function createTownLabelMetrics(labelText) {
+		const text =
+			typeof labelText === "string" && labelText.trim()
+				? labelText.trim()
+				: "T?";
+		return {
+			text,
+			widthPx: Math.max(
+				TOWN_LABEL_MIN_WIDTH_PX,
+				text.length * 7 + TOWN_LABEL_HORIZONTAL_PADDING_PX * 2,
+			),
+			heightPx: TOWN_LABEL_HEIGHT_PX,
+		};
+	}
+
+	function getTownLabelBox(centerPoint, radiusPx, labelMetrics) {
+		const x = Number(centerPoint?.x);
+		const y = Number(centerPoint?.y);
+		const radius = Number(radiusPx);
+		const width = Number(labelMetrics?.widthPx);
+		const height = Number(labelMetrics?.heightPx);
+		if (
+			!Number.isFinite(x) ||
+			!Number.isFinite(y) ||
+			!Number.isFinite(radius) ||
+			!Number.isFinite(width) ||
+			!Number.isFinite(height)
+		) {
+			return null;
+		}
+
+		const left = x - width / 2;
+		const top = y - radius - height - TOWN_LABEL_VERTICAL_OFFSET_PX;
+		return {
+			left,
+			top,
+			width,
+			height,
+			centerX: x,
+			centerY: top + height / 2,
+		};
 	}
 
 	function projectWorldRing(points, projector) {
@@ -1647,13 +1754,24 @@ function createPlanningLiveRenderer({
 				.filter((polygon) => polygon.length >= 3);
 			const centerPoint = projectWorldPoint(connectedNation.center);
 			const projectedTownMarkers = (connectedNation.towns ?? [])
-				.map((town) => ({
+				.map((town, townIndex) => ({
 					town,
 					centerPoint: projectWorldPoint(town),
 					radiusPx: markerMetrics.townRadiusPx,
 					isDisconnected: connectivity.disconnectedTownIds.has(town.id),
+					labelMetrics: createTownLabelMetrics(`T${townIndex + 1}`),
 				}))
 				.filter((townMarker) => townMarker.centerPoint != null);
+			const projectedTownRangeHighlights = (connectedNation.towns ?? [])
+				.map((town) => ({
+					town,
+					isDisconnected: connectivity.disconnectedTownIds.has(town.id),
+					polygons: projectWorldMultiPolygon(
+						[[createPlanningCircleVertices(town, town.rangeRadiusBlocks)]],
+						projectWorldPoint,
+					),
+				}))
+				.filter((townRange) => flattenPolygons(townRange.polygons).length >= 3);
 			const rangePoints = [
 				...flattenPolygons(projectedRangePolygon),
 				...disconnectedRangePolygons.flatMap((polygon) => flattenPolygons([polygon])),
@@ -1681,6 +1799,7 @@ function createPlanningLiveRenderer({
 						strokePx: markerMetrics.nationStrokePx,
 					},
 				townMarkers: projectedTownMarkers,
+				townRangeHighlights: projectedTownRangeHighlights,
 			});
 		}
 
@@ -1695,6 +1814,15 @@ function createPlanningLiveRenderer({
 			),
 			...shape.townMarkers.flatMap((townMarker) =>
 				createBoundsPointsForCircle(townMarker.centerPoint, townMarker.radiusPx),
+			),
+			...shape.townMarkers.flatMap((townMarker) =>
+				createBoundsPointsForRect(
+					getTownLabelBox(
+						townMarker.centerPoint,
+						townMarker.radiusPx,
+						townMarker.labelMetrics,
+					),
+				),
 			),
 		]);
 		const overallBounds = computeBounds(allPoints);
@@ -1787,6 +1915,36 @@ function createPlanningLiveRenderer({
 					}),
 				);
 			}
+			for (const townRange of shape.townRangeHighlights ?? []) {
+				const townRangePath = buildMultiPath(
+					normalizePolygonsForBounds(townRange.polygons, origin),
+				);
+				if (!townRangePath) continue;
+				nextChildren.push(
+					createSvgChild("path", {
+						d: townRangePath,
+						fill: townRange.isDisconnected
+							? DISCONNECTED_TOWN_RANGE_HOVER_FILL
+							: CONNECTED_TOWN_RANGE_HOVER_FILL,
+						"fill-opacity": "0",
+						"fill-rule": "evenodd",
+						stroke: townRange.isDisconnected
+							? DISCONNECTED_TOWN_RANGE_HOVER_STROKE
+							: CONNECTED_TOWN_RANGE_HOVER_STROKE,
+						"stroke-opacity": "0",
+						"stroke-linejoin": "round",
+						"stroke-width": "0",
+						"vector-effect": "non-scaling-stroke",
+						"pointer-events": "none",
+						"data-planning-nation-id": shape.nation.id,
+						"data-planning-town-id": townRange.town.id,
+						"data-planning-shape": "town-range-highlight",
+						"data-planning-state": townRange.isDisconnected
+							? "disconnected"
+							: "connected",
+					}),
+				);
+			}
 			for (const townMarker of shape.townMarkers) {
 				const localTownCenter = normalizePointsForBounds(
 					[townMarker.centerPoint],
@@ -1817,6 +1975,54 @@ function createPlanningLiveRenderer({
 							: "connected",
 					}),
 				);
+			}
+			for (const townMarker of shape.townMarkers) {
+				const labelBox = getTownLabelBox(
+					townMarker.centerPoint,
+					townMarker.radiusPx,
+					townMarker.labelMetrics,
+				);
+				if (!labelBox || !townMarker.labelMetrics?.text) continue;
+				const localLabelLeft = labelBox.left - origin.x;
+				const localLabelTop = labelBox.top - origin.y;
+				const localLabelCenterX = labelBox.centerX - origin.x;
+				const localLabelCenterY = labelBox.centerY - origin.y;
+				nextChildren.push(
+					createSvgChild("rect", {
+						x: localLabelLeft.toFixed(2),
+						y: localLabelTop.toFixed(2),
+						width: labelBox.width.toFixed(2),
+						height: labelBox.height.toFixed(2),
+						rx: "7",
+						ry: "7",
+						fill: TOWN_LABEL_BG_FILL,
+						"fill-opacity": "0.9",
+						stroke: TOWN_LABEL_BG_STROKE,
+						"stroke-opacity": "0.22",
+						"stroke-width": "1",
+						"vector-effect": "non-scaling-stroke",
+						"pointer-events": "none",
+						"data-planning-nation-id": shape.nation.id,
+						"data-planning-town-id": townMarker.town.id,
+						"data-planning-shape": "town-label-bg",
+					}),
+				);
+				const townLabel = createSvgChild("text", {
+					x: localLabelCenterX.toFixed(2),
+					y: localLabelCenterY.toFixed(2),
+					fill: TOWN_LABEL_TEXT_FILL,
+					"font-family": "\"Space Grotesk\", \"Segoe UI\", sans-serif",
+					"font-size": String(TOWN_LABEL_FONT_SIZE_PX),
+					"font-weight": "800",
+					"text-anchor": "middle",
+					"dominant-baseline": "middle",
+					"pointer-events": "none",
+					"data-planning-nation-id": shape.nation.id,
+					"data-planning-town-id": townMarker.town.id,
+					"data-planning-shape": "town-label",
+				});
+				townLabel.textContent = townMarker.labelMetrics.text;
+				nextChildren.push(townLabel);
 			}
 		}
 
