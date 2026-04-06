@@ -38,7 +38,8 @@ const HEADER = `// ==UserScript==
 
 const outdir = 'dist'
 const outfile = path.join(outdir, 'emc-dynmapplus.user.js')
-const webAccessibleScripts = (MANIFEST.web_accessible_resources?.[0]?.resources || []).filter(file => file.endsWith('.js'))
+const isInjectableScriptResource = file => /\.c?js$/i.test(String(file || ''))
+const webAccessibleScripts = (MANIFEST.web_accessible_resources?.[0]?.resources || []).filter(isInjectableScriptResource)
 const entryPoints = [...new Set([...webAccessibleScripts, ...contentScripts.js])]
 
 const buildOpts = {

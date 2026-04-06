@@ -21,6 +21,11 @@ const contentDebugInfo = (...args) => {
 	if (isContentDebugLoggingEnabled()) console.info(...args)
 }
 
+/** @param {string} resource */
+function isPageContextScriptResource(resource) {
+	return /\.c?js$/i.test(String(resource || ''))
+}
+
 function consumePendingUiAlert() {
 	try {
 		const rawAlert = localStorage[ENTRYPOINT_PENDING_UI_ALERT_KEY]
@@ -131,7 +136,7 @@ function parseEventDetail(detail) {
 		} else {
 			root?.setAttribute(PAGE_CONTEXT_GUARD_ATTR, 'true')
 			const resources = getWebAccessibleResourceList(manifest)
-			const jsFiles = resources.filter(s => s.endsWith('.js'))
+			const jsFiles = resources.filter(isPageContextScriptResource)
 			contentDebugInfo(`${CONTENT_LOG_PREFIX}: injecting page-context resources`, { resources: jsFiles })
 			for (const file of jsFiles) {
 				await injectScript(file)

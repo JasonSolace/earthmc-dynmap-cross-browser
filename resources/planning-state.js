@@ -248,7 +248,7 @@ function createPlanningState({
 		const savedRange = normalizePlanningRange(
 			readStorageValue(planningDefaultRangeKey),
 		);
-		return savedRange ?? defaultPlanningNationRange;
+		return savedRange > 0 ? savedRange : defaultPlanningNationRange;
 	}
 
 	function setPlanningDefaultRange(range) {

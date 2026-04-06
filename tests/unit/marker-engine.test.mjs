@@ -409,6 +409,61 @@ test("marker engine keeps Aurora on country borders only", async () => {
 	assert.equal(result.find((layer) => layer.id === "stateBorders"), undefined);
 });
 
+test("marker engine skips squaremap polygons without tooltip metadata", async () => {
+	const consoleErrors = [];
+	const { exports } = loadMarkerEngine({
+		extraGlobals: {
+			console: {
+				...console,
+				error(...args) {
+					consoleErrors.push(args);
+				},
+			},
+		},
+	});
+
+	const result = await exports.modifyMarkersInPage([
+		{
+			id: "towny",
+			name: "Towns",
+			markers: [
+				{
+					type: "polygon",
+					tooltip: null,
+					popup: "<div>Non-town polygon</div>",
+					points: [[[
+						{ x: 0, z: 0 },
+						{ x: 16, z: 0 },
+						{ x: 16, z: 16 },
+						{ x: 0, z: 16 },
+					]]],
+				},
+				{
+					type: "polygon",
+					tooltip:
+						'<div><span style="font-size:120%;"><b>Test Town</b></span> (Nationless)\n    <i>/town set board [msg]</i></div>',
+					popup:
+						'<div><span style="font-size:120%;"><b>Test Town</b></span><br>\nMayor: <b>MayorOne</b>\n\t<br>\nCouncillors: <b>None</b>\n\t<br>\n<details><summary>Residents</summary>\n    \tMayorOne\n   \t</details>\n   \t<br>\n<i>/town set board [msg]</i> \n    <br>\nFlags: <b>true</b> <b>false</b></div>',
+					points: [[[
+						{ x: 32, z: 32 },
+						{ x: 48, z: 32 },
+						{ x: 48, z: 48 },
+						{ x: 32, z: 48 },
+					]]],
+				},
+			],
+		},
+	]);
+
+	assert.equal(Array.isArray(result), true);
+	assert.equal(
+		consoleErrors.some(
+			(args) => String(args?.[0] ?? "").includes("failed to process marker"),
+		),
+		false,
+	);
+});
+
 test("marker engine loads gzipped packaged border resources", async () => {
 	const { exports } = loadMarkerEngine({
 		extraGlobals: {

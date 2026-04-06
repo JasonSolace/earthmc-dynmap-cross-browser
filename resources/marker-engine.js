@@ -559,6 +559,16 @@ async function modifyMarkersInPage(data) {
 
 	for (const marker of result[0].markers) {
 		if (marker.type !== "polygon" && marker.type !== "icon") continue;
+		const hasParsableMarkerDescription = isSquaremap
+			? typeof marker.tooltip === "string" && typeof marker.popup === "string"
+			: typeof marker.popup === "string";
+		if (!hasParsableMarkerDescription) {
+			pageMarkersDebugInfo(`${MARKER_ENGINE_PREFIX}: skipped marker without parsable description`, {
+				type: marker?.type,
+				tooltip: marker?.tooltip?.slice?.(0, 120) || null,
+			});
+			continue;
+		}
 
 		try {
 			const parsedInfo = isSquaremap ? modifyDescription(marker, mapMode) : modifyDynmapDescription(marker, date);

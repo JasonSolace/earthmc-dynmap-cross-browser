@@ -312,6 +312,13 @@ test("menu normalizes stored planning nation data", () => {
 		}).rangeRadiusBlocks,
 		3200,
 	);
+	localStorage["emcdynmapplus-planning-default-range"] = "0";
+	assert.equal(
+		exports.normalizePlanningNation({
+			center: { x: 3, z: 4 },
+		}).rangeRadiusBlocks,
+		5000,
+	);
 });
 
 test("menu validates archive dates before switching the extension into archive mode", () => {
@@ -826,6 +833,7 @@ test("planning town range updates existing and future towns together", () => {
 
 test("planning can reposition an existing town from the sidebar", () => {
 	const alerts = [];
+	let dismissedAlerts = 0;
 	const seedNation = {
 		id: "nation-1",
 		name: "Planning Nation",
@@ -856,6 +864,9 @@ test("planning can reposition an existing town from the sidebar", () => {
 			},
 			showAlert(message) {
 				alerts.push(message);
+			},
+			dismissAlert() {
+				dismissedAlerts += 1;
 			},
 		},
 	});
@@ -888,6 +899,9 @@ test("planning can reposition an existing town from the sidebar", () => {
 		),
 		false,
 	);
+	assert.equal(dismissedAlerts, 1);
+	assert.equal(findByTitle(sidebar, "Reposition armed"), null);
+	assert.ok(findByTitle(sidebar, "Reposition town"));
 	const savedNation = JSON.parse(localStorage["emcdynmapplus-planner-nations"])[0];
 	assert.deepEqual(savedNation.towns[0], {
 		id: "town-1",

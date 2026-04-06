@@ -216,6 +216,12 @@ function createAlertElement() {
 	return alert
 }
 
+function dismissAlert() {
+	clearTimeout(alertTimeout)
+	alertTimeout = null
+	document.querySelector('#alert')?.remove()
+}
+
 /**
  * Shows an alert message in a box at the center of the screen.
  * @param {Node | string | number | boolean | null | undefined | Array<Node | string | number | boolean | null | undefined>} message
@@ -228,6 +234,7 @@ function showAlert(message, timeout = null) {
 	replaceChildrenSafe(alert.querySelector('#alert-message'), message)
 
 	clearTimeout(alertTimeout)
+	alertTimeout = null
 	if (timeout) alertTimeout = setTimeout(() => alert.remove(), timeout*1000)
 
 	return alert

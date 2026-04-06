@@ -87,6 +87,15 @@
 		});
 	}
 
+	function clearPlanningPlacementAlert() {
+		if (typeof globalThis.dismissAlert === "function") {
+			globalThis.dismissAlert();
+			return;
+		}
+
+		document.querySelector("#alert")?.remove();
+	}
+
 	function usePlanningLiveUpdates() {
 		return (
 			document.documentElement?.getAttribute?.(PLANNING_LIVE_READY_ATTR) ===
@@ -493,13 +502,13 @@
 				)
 				: [...(activeNation.towns ?? []), town],
 		};
+		setPlanningPlacementMode("none");
 		const savedNation = saveSinglePlanningNation(nation, source);
 		if (!savedNation) return null;
 		planningTownDraft = createPlanningTownDraft({
 			rangeRadiusBlocks:
 				placementTarget?.rangeRadiusBlocks ?? planningTownDraft.rangeRadiusBlocks,
 		});
-		setPlanningPlacementMode("none");
 
 		setPlanningDebugState("stored planning town", {
 			source,
@@ -532,9 +541,10 @@
 	}
 
 	function placeHardcodedPlanningNation(center, source = "unknown") {
+		setPlanningPlacementMode("none");
 		const nation = storePlanningNation(center, source);
 		if (!nation) return false;
-		setPlanningPlacementMode("none");
+		clearPlanningPlacementAlert();
 		if (!usePlanningLiveUpdates()) reloadPlanningMapAt(nation.center);
 		return true;
 	}
@@ -547,6 +557,7 @@
 
 		const result = storePlanningTown(center, source);
 		if (!result) return false;
+		clearPlanningPlacementAlert();
 		if (!usePlanningLiveUpdates()) reloadPlanningMapAt(result.nation.center);
 		return true;
 	}
@@ -674,7 +685,7 @@
 					? "Town reposition armed. Click on the live map to move the town."
 					: "Town placement armed. Click on the live map to place the town."
 				: "Planning placement armed. Click on the live map to place the nation center.",
-			5,
+			3,
 		);
 		setPlanningDebugState("placement armed", {
 			mode,
@@ -692,7 +703,7 @@
 			placementTarget
 				? "Town reposition armed. Click on the live map to move the town."
 				: "Town placement armed. Click on the live map to place the town.",
-			5,
+			3,
 		);
 		setPlanningDebugState("placement armed", {
 			mode: "town",
