@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { loadIifeScript, loadIifeScripts } from "./helpers/script-harness.mjs";
+import { loadIifeScripts } from "./helpers/script-harness.mjs";
 
 function loadPlanningLiveRenderer(options = {}) {
-	return loadIifeScript(
-		"resources/planning-live-renderer.js",
+	return loadIifeScripts(
+		[
+			"resources/planning-geometry.js",
+			"resources/planning-live-renderer.js",
+		],
 		["createPlanningLiveRenderer", "PLANNING_LIVE_READY_ATTR"],
 		options,
 	);
@@ -154,9 +157,272 @@ test("planning live renderer tolerates a Leaflet map before center and size are 
 	assert.equal(renderer.isLiveReady(), true);
 });
 
+test("planning live renderer publishes generic live map blocks-per-pixel with no nations", () => {
+	const { exports, document } = loadPlanningLiveRenderer();
+	const mapContainer = document.createElement("div");
+	mapContainer.setBoundingClientRect({
+		left: 0,
+		top: 0,
+		width: 800,
+		height: 600,
+		right: 800,
+		bottom: 600,
+	});
+	document.__setQuery(".leaflet-container", mapContainer);
+
+	const renderer = exports.createPlanningLiveRenderer({
+		createPlanningCircleVertices(point, radiusBlocks) {
+			return [
+				{ x: point.x - radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z - radiusBlocks },
+				{ x: point.x + radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z + radiusBlocks },
+			];
+		},
+		getPlanningNations: () => [],
+		getPrimaryLeafletMap: () => ({
+			getContainer: () => mapContainer,
+			on() {},
+		}),
+		sampleWorldPoint(clientX, clientY) {
+			return {
+				x: Math.round(clientX),
+				z: Math.round(clientY),
+			};
+		},
+	});
+
+	const result = renderer.render();
+	assert.equal(result.ok, true);
+	assert.equal(
+		document.documentElement.getAttribute(
+			"data-emcdynmapplus-planning-live-map-blocks-per-pixel",
+		),
+		"1",
+	);
+});
+
+test("planning live renderer publishes exact projected preview diameter from the active cursor request", () => {
+	const { exports, document } = loadPlanningLiveRenderer();
+	const mapContainer = document.createElement("div");
+	mapContainer.setBoundingClientRect({
+		left: 100,
+		top: 200,
+		width: 800,
+		height: 600,
+		right: 900,
+		bottom: 800,
+	});
+	document.__setQuery(".leaflet-container", mapContainer);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-preview-active",
+		"true",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-preview-kind",
+		"nation",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-preview-range-blocks",
+		"50",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-preview-client-x",
+		"350",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-preview-client-y",
+		"420",
+	);
+
+	const renderer = exports.createPlanningLiveRenderer({
+		createPlanningCircleVertices(point, radiusBlocks) {
+			return [
+				{ x: point.x - radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z - radiusBlocks },
+				{ x: point.x + radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z + radiusBlocks },
+			];
+		},
+		getPlanningNations: () => [],
+		planningLeafletAdapter: {
+			canProjectWithMap: () => true,
+			latLngToWorld: (latLng) => ({ x: latLng.lng, z: latLng.lat }),
+			projectWorldToLayerPoint: (point) => ({ x: point.x, y: point.z }),
+		},
+		getPrimaryLeafletMap: () => ({
+			getContainer: () => mapContainer,
+			getCenter: () => ({ lat: 0, lng: 0 }),
+			containerPointToLatLng: (point) => ({ lat: point.y, lng: point.x }),
+			latLngToLayerPoint: (latLng) => ({ x: latLng.lng, y: latLng.lat }),
+			layerPointToLatLng: (point) => ({ lat: point.y, lng: point.x }),
+			on() {},
+		}),
+	});
+
+	const result = renderer.render();
+	assert.equal(result.ok, true);
+	assert.equal(
+		document.documentElement.getAttribute(
+			"data-emcdynmapplus-planning-preview-exact-diameter-px",
+		),
+		"100",
+	);
+	assert.equal(
+		document.documentElement.getAttribute(
+			"data-emcdynmapplus-planning-preview-exact-mode",
+		),
+		"exact-projected",
+	);
+});
+
+test("planning live renderer publishes town-specific live blocks-per-pixel", () => {
+	const { exports, document } = loadPlanningLiveRenderer();
+	const mapContainer = document.createElement("div");
+	mapContainer.setBoundingClientRect({
+		left: 0,
+		top: 0,
+		width: 800,
+		height: 600,
+		right: 800,
+		bottom: 600,
+	});
+	document.__setQuery(".leaflet-container", mapContainer);
+
+	const renderer = exports.createPlanningLiveRenderer({
+		createPlanningCircleVertices(point, radiusBlocks) {
+			return [
+				{ x: point.x - radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z - radiusBlocks },
+				{ x: point.x + radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z + radiusBlocks },
+			];
+		},
+		getPlanningNations: () => [
+			{
+				id: "nation-1",
+				name: "Nation 1",
+				center: { x: 100, z: 200 },
+				rangeRadiusBlocks: 50,
+				color: "#123456",
+				outlineColor: "#abcdef",
+				towns: [
+					{
+						id: "town-1",
+						x: 140,
+						z: 200,
+						rangeRadiusBlocks: 20,
+					},
+				],
+			},
+		],
+		getPrimaryLeafletMap: () => ({
+			getContainer: () => mapContainer,
+			on() {},
+		}),
+		sampleWorldPoint(clientX, clientY) {
+			return {
+				x: Math.round(clientX),
+				z: Math.round(clientY),
+			};
+		},
+	});
+
+	const result = renderer.render();
+	assert.equal(result.ok, true);
+	assert.equal(
+		document.documentElement.getAttribute(
+			"data-emcdynmapplus-planning-live-town-blocks-per-pixel",
+		),
+		"1",
+	);
+});
+
+test("planning live renderer publishes nation preview scale from the base nation circle", () => {
+	const { exports, document } = loadPlanningLiveRenderer();
+	const mapContainer = document.createElement("div");
+	mapContainer.setBoundingClientRect({
+		left: 0,
+		top: 0,
+		width: 800,
+		height: 600,
+		right: 800,
+		bottom: 600,
+	});
+	document.__setQuery(".leaflet-container", mapContainer);
+
+	const renderer = exports.createPlanningLiveRenderer({
+		createPlanningCircleVertices(point, radiusBlocks) {
+			return [
+				{ x: point.x - radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z - radiusBlocks },
+				{ x: point.x + radiusBlocks, z: point.z },
+				{ x: point.x, z: point.z + radiusBlocks },
+			];
+		},
+		createPlanningRangeMultiPolygon() {
+			return [[
+				{ x: 0, z: 0 },
+				{ x: 200, z: 0 },
+				{ x: 200, z: 100 },
+				{ x: 0, z: 100 },
+			]];
+		},
+		getPlanningNations: () => [
+			{
+				id: "nation-1",
+				name: "Nation 1",
+				center: { x: 100, z: 200 },
+				rangeRadiusBlocks: 50,
+				color: "#123456",
+				outlineColor: "#abcdef",
+				towns: [
+					{
+						id: "town-1",
+						x: 160,
+						z: 200,
+						rangeRadiusBlocks: 20,
+					},
+				],
+			},
+		],
+		getPrimaryLeafletMap: () => ({
+			getContainer: () => mapContainer,
+			on() {},
+		}),
+		sampleWorldPoint(clientX, clientY) {
+			return {
+				x: Math.round(clientX),
+				z: Math.round(clientY),
+			};
+		},
+	});
+
+	const result = renderer.render();
+	assert.equal(result.ok, true);
+	assert.equal(
+		document.documentElement.getAttribute(
+			"data-emcdynmapplus-planning-live-blocks-per-pixel",
+		),
+		"1",
+	);
+	assert.deepEqual(
+		JSON.parse(JSON.stringify(renderer.measureRenderedNation()?.previewRangeBounds)),
+		{
+			left: 50,
+			top: 150,
+			right: 150,
+			bottom: 250,
+			width: 100,
+			height: 100,
+		},
+	);
+});
+
 test("planning live renderer uses native Leaflet projection when an adapter is provided", () => {
 	const { exports, context, document } = loadIifeScripts(
 		[
+			"resources/planning-geometry.js",
 			"resources/planning-leaflet-adapter.js",
 			"resources/planning-live-renderer.js",
 		],

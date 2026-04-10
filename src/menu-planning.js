@@ -116,7 +116,10 @@
 	}
 
 	function createPlanningEntityId(prefix = "planning") {
-		if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+		if (
+			typeof crypto !== "undefined" &&
+			typeof crypto.randomUUID === "function"
+		) {
 			return `${prefix}-${crypto.randomUUID()}`;
 		}
 
@@ -128,9 +131,7 @@
 			overrides?.rangeRadiusBlocks ?? DEFAULT_PLANNING_TOWN_RANGE,
 		);
 		return {
-			rangeRadiusBlocks: String(
-				normalizedRange ?? DEFAULT_PLANNING_TOWN_RANGE,
-			),
+			rangeRadiusBlocks: String(normalizedRange ?? DEFAULT_PLANNING_TOWN_RANGE),
 		};
 	}
 
@@ -177,6 +178,7 @@
 		normalizePlanningRange,
 		getPlanningPreviewScaleInfo,
 		getScaledPreviewDiameterMetrics,
+		getPlanningCursorPreviewDebugInfo,
 		ensurePlanningCursorPreview,
 		updatePlanningCursorPreviewState,
 		updatePlanningCursorPreviewVisual,
@@ -194,6 +196,7 @@
 				const activeNation = getHardcodedPlanningNation();
 				const placementTarget = getPlanningTownPlacementTarget(activeNation);
 				return {
+					kind: "town",
 					rangeRadiusBlocks:
 						placementTarget?.rangeRadiusBlocks ?? getPlanningTownDraftRange(),
 					label: placementTarget ? "Reposition Town" : "Add Town",
@@ -203,9 +206,10 @@
 			const activeNation = getHardcodedPlanningNation();
 			return activeNation
 				? {
-					rangeRadiusBlocks: activeNation.rangeRadiusBlocks,
-					label: activeNation.name,
-				}
+						kind: "nation",
+						rangeRadiusBlocks: activeNation.rangeRadiusBlocks,
+						label: activeNation.name,
+					}
 				: null;
 		},
 		debugInfo: planningDebugInfo,
@@ -256,7 +260,11 @@
 		location.href = nextUrl.toString();
 	}
 
-	function setPlanningDefaultRange(range, source = "unknown", notifyRuntime = true) {
+	function setPlanningDefaultRange(
+		range,
+		source = "unknown",
+		notifyRuntime = true,
+	) {
 		const storedRange = savePlanningDefaultRange(range);
 		setPlanningDebugState("updated planning default range", {
 			source,
@@ -277,14 +285,18 @@
 
 	function canPlacePlanningTown(center, nation, options = {}) {
 		const excludedTownId =
-			typeof options?.excludedTownId === "string" ? options.excludedTownId : null;
+			typeof options?.excludedTownId === "string"
+				? options.excludedTownId
+				: null;
 		const scopedNation =
 			excludedTownId == null
 				? nation
 				: {
-					...nation,
-					towns: (nation?.towns ?? []).filter((town) => town.id !== excludedTownId),
-				};
+						...nation,
+						towns: (nation?.towns ?? []).filter(
+							(town) => town.id !== excludedTownId,
+						),
+					};
 		const connectivity = getPlanningTownConnectivity(scopedNation);
 		return connectivity.connectedAnchors.some((anchor) =>
 			isPlanningPointWithinRange(center, anchor),
@@ -303,7 +315,10 @@
 		};
 	}
 
-	function buildPlanningTown(center, activeNation = getHardcodedPlanningNation()) {
+	function buildPlanningTown(
+		center,
+		activeNation = getHardcodedPlanningNation(),
+	) {
 		return normalizePlanningTown({
 			id: createPlanningEntityId("planning-town"),
 			x: Math.round(center.x),
@@ -346,10 +361,12 @@
 		}
 
 		setPlanningDefaultRange(normalizedRange, source, false);
-		savePlanningNations([{
-			...activeNation,
-			rangeRadiusBlocks: normalizedRange,
-		}]);
+		savePlanningNations([
+			{
+				...activeNation,
+				rangeRadiusBlocks: normalizedRange,
+			},
+		]);
 		setPlanningDebugState("updated placed planning range", {
 			source,
 			rangeRadiusBlocks: normalizedRange,
@@ -459,12 +476,12 @@
 		const existingNation = getHardcodedPlanningNation();
 		const nation = existingNation
 			? {
-				...existingNation,
-				center: {
-					x: Math.round(center.x),
-					z: Math.round(center.z),
-				},
-			}
+					...existingNation,
+					center: {
+						x: Math.round(center.x),
+						z: Math.round(center.z),
+					},
+				}
 			: buildPlanningNation(center);
 		return saveSinglePlanningNation(nation, source);
 	}
@@ -487,10 +504,10 @@
 
 		const town = placementTarget
 			? normalizePlanningTown({
-				...placementTarget,
-				x: Math.round(center.x),
-				z: Math.round(center.z),
-			})
+					...placementTarget,
+					x: Math.round(center.x),
+					z: Math.round(center.z),
+				})
 			: buildPlanningTown(center, activeNation);
 		if (!town) return null;
 
@@ -498,8 +515,8 @@
 			...activeNation,
 			towns: placementTarget
 				? (activeNation.towns ?? []).map((existingTown) =>
-					existingTown.id === placementTarget.id ? town : existingTown,
-				)
+						existingTown.id === placementTarget.id ? town : existingTown,
+					)
 				: [...(activeNation.towns ?? []), town],
 		};
 		setPlanningPlacementMode("none");
@@ -507,7 +524,8 @@
 		if (!savedNation) return null;
 		planningTownDraft = createPlanningTownDraft({
 			rangeRadiusBlocks:
-				placementTarget?.rangeRadiusBlocks ?? planningTownDraft.rangeRadiusBlocks,
+				placementTarget?.rangeRadiusBlocks ??
+				planningTownDraft.rangeRadiusBlocks,
 		});
 
 		setPlanningDebugState("stored planning town", {
@@ -627,10 +645,13 @@
 				PLANNING_NATIVE_PLACEMENT_READY_ATTR,
 			) === "true"
 		) {
-			setPlanningDebugState("ignored text placement click in favor of native placement bridge", {
-				targetTag: target.tagName,
-				targetClassName: target.className || null,
-			});
+			setPlanningDebugState(
+				"ignored text placement click in favor of native placement bridge",
+				{
+					targetTag: target.tagName,
+					targetClassName: target.className || null,
+				},
+			);
 			return;
 		}
 
@@ -649,9 +670,7 @@
 		const detail = parsePlanningPlacementEventDetail(event.detail);
 		const center = detail?.center ?? null;
 		const source =
-			typeof detail?.source === "string"
-				? detail.source
-				: "custom-event";
+			typeof detail?.source === "string" ? detail.source : "custom-event";
 		setPlanningDebugState("received planning placement event", {
 			source,
 			center,
@@ -835,7 +854,9 @@
 				showAlert("Saved range for the next nation placement.", 4);
 			}
 		};
-		rangeInput.addEventListener("input", () => updatePlanningCursorPreviewVisual());
+		rangeInput.addEventListener("input", () =>
+			updatePlanningCursorPreviewVisual(),
+		);
 		rangeInput.addEventListener("change", applyPlanningRangeFromInput);
 		rangeInput.addEventListener("blur", applyPlanningRangeFromInput);
 		rangeInput.addEventListener("keyup", (event) => {
@@ -848,11 +869,12 @@
 			createElement("button", {
 				className: "sidebar-button sidebar-button-primary",
 				id: "planning-place-button",
-				text: getPlanningPlacementMode() === "nation-center"
-					? "Click Map"
-					: placedNation
-						? "Reposition Nation"
-						: "Add Nation",
+				text:
+					getPlanningPlacementMode() === "nation-center"
+						? "Click Map"
+						: placedNation
+							? "Reposition Nation"
+							: "Add Nation",
 				type: "button",
 			}),
 		);
@@ -879,7 +901,7 @@
 				id: "planning-center-label",
 				className: "planning-section-meta planning-center-meta",
 				text: placedCenter
-					? `Center X ${placedCenter.x} Z ${placedCenter.z}`
+					? `Center: X ${placedCenter.x}, Z ${placedCenter.z}`
 					: "Center not set",
 			}),
 		);
@@ -1009,7 +1031,11 @@
 
 		function renderTownList(activeNation) {
 			townList.replaceChildren();
-			if (!activeNation || !Array.isArray(activeNation.towns) || activeNation.towns.length === 0) {
+			if (
+				!activeNation ||
+				!Array.isArray(activeNation.towns) ||
+				activeNation.towns.length === 0
+			) {
 				addElement(
 					townList,
 					createElement("p", {
@@ -1031,13 +1057,13 @@
 						attrs: {
 							...(isDisconnected
 								? {
-									"data-state": "disconnected",
-								}
+										"data-state": "disconnected",
+									}
 								: {}),
 							...(planningTownPlacementTargetId === town.id
 								? {
-									"data-active": "true",
-								}
+										"data-active": "true",
+									}
 								: {}),
 							title: isDisconnected
 								? `Disconnected town at X ${town.x} Z ${town.z}`
@@ -1072,7 +1098,7 @@
 					townRow,
 					createElement("div", {
 						className: "planning-town-row-coords",
-						text: `X ${town.x}  Z ${town.z}`,
+						text: `X: ${town.x},  Z: ${town.z}`,
 					}),
 				);
 				addElement(
@@ -1147,31 +1173,31 @@
 			const currentRange =
 				activeNation?.rangeRadiusBlocks ?? getPlanningDefaultRange();
 			section.querySelector("#planning-center-label").textContent = center
-				? `Center X ${center.x} Z ${center.z}`
+				? `Center: X: ${center.x}, Z: ${center.z}`
 				: "Center not set";
 			rangeInput.value = String(currentRange);
-			createNationButton.textContent = placementMode === "nation-center"
-				? "Click Map"
-				: activeNation
-					? "Reposition Nation"
-					: "Add Nation";
-			placeTownButton.textContent = placementMode === "town" &&
-				planningTownPlacementTargetId == null
-				? "Click Map"
-				: "Add Town";
+			createNationButton.textContent =
+				placementMode === "nation-center"
+					? "Click Map"
+					: activeNation
+						? "Reposition Nation"
+						: "Add Nation";
+			placeTownButton.textContent =
+				placementMode === "town" && planningTownPlacementTargetId == null
+					? "Click Map"
+					: "Add Town";
 			removeNationButton.disabled = !activeNation;
 			placeTownButton.disabled = !activeNation;
 			townRangeInput.value = planningTownDraft.rangeRadiusBlocks;
 			section.querySelector("#planning-town-count-label").textContent =
 				`${activeNation?.towns?.length ?? 0} total`;
-			section.querySelector("#planning-town-helper").textContent =
-				!activeNation
-					? "Place a nation center first, then add towns."
-					: placementMode === "town" && planningTownPlacementTargetId
-						? "Click the map to reposition the selected town."
-						: placementMode === "town"
-							? "Click the map to add a new town."
-							: "Add a town or move an existing one.";
+			section.querySelector("#planning-town-helper").textContent = !activeNation
+				? "Place a nation center first, then add towns."
+				: placementMode === "town" && planningTownPlacementTargetId
+					? "Click the map to reposition the selected town."
+					: placementMode === "town"
+						? "Click the map to add a new town."
+						: "Add a town or move an existing one.";
 			renderTownList(activeNation);
 			updatePlanningCursorPreviewState();
 		};
@@ -1183,6 +1209,31 @@
 				armPlanningPlacement("nation-center");
 			}
 			syncPlanningSectionState();
+			if (
+				isPlanningDebugLoggingEnabled() &&
+				getPlanningPlacementMode() === "nation-center"
+			) {
+				const debugSnapshot = getPlanningCursorPreviewDebugInfo();
+				planningDebugInfo(
+					`${PLANNING_UI_PREFIX}: add nation preview diagnostics`,
+					{
+						trigger: "planning-place-button",
+						mapMode: getStoredCurrentMapMode(),
+						placementMode: getPlanningPlacementMode(),
+						previewLabel: `${debugSnapshot.previewSubjectLabel} - ${debugSnapshot.rangeRadiusBlocks} b`,
+						rangeRadiusBlocks: debugSnapshot.rangeRadiusBlocks,
+						rawPreviewDiameterPx:
+							debugSnapshot.diameterMetrics?.rawDiameterPx ?? null,
+						previewDiameterPx:
+							debugSnapshot.diameterMetrics?.previewDiameterPx ?? null,
+						previewWasClamped:
+							debugSnapshot.diameterMetrics?.wasClamped ?? null,
+						scaleInfo: debugSnapshot.scaleInfo ?? null,
+						liveScaleAttrs: debugSnapshot.liveScaleAttrs ?? null,
+						exactPreviewAttrs: debugSnapshot.exactPreviewAttrs ?? null,
+					},
+				);
+			}
 		});
 		placeTownButton.addEventListener("click", () => {
 			if (!getHardcodedPlanningNation()) {
@@ -1190,7 +1241,10 @@
 				return;
 			}
 			if (!commitPlanningTownDraftRange(true)) return;
-			if (getPlanningPlacementMode() === "town" && planningTownPlacementTargetId == null) {
+			if (
+				getPlanningPlacementMode() === "town" &&
+				planningTownPlacementTargetId == null
+			) {
 				setPlanningPlacementMode("none");
 			} else {
 				armPlanningTownPlacement();
@@ -1210,6 +1264,7 @@
 		parseZoomFromTileUrl,
 		getPlanningPreviewScaleInfo,
 		getScaledPreviewDiameterMetrics,
+		getPlanningCursorPreviewDebugInfo,
 		normalizePlanningRange,
 		normalizePlanningNation,
 		setPlanningPlacementArmed,

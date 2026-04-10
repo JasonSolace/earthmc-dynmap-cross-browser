@@ -538,6 +538,7 @@ select {
 }
 
 .planning-cursor-preview-ring {
+	box-sizing: border-box;
 	width: var(--planning-preview-size, 72px);
 	height: var(--planning-preview-size, 72px);
 	border-radius: 999px;
@@ -546,7 +547,7 @@ select {
 	box-shadow:
 		0 0 0 1px rgba(255, 243, 207, 0.55) inset,
 		0 8px 18px rgba(25, 18, 8, 0.18);
-	display: none;
+	display: block;
 }
 
 .planning-cursor-preview-center {
@@ -578,7 +579,7 @@ select {
 	letter-spacing: 0.04em;
 	white-space: nowrap;
 	box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
-	display: none;
+	display: block;
 }
 
 :root[data-emcdynmapplus-planning-armed] .leaflet-container {

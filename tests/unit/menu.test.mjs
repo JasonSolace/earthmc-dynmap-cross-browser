@@ -126,6 +126,7 @@ function loadMenu(options = {}) {
 			"parseZoomFromTileUrl",
 			"getPlanningPreviewScaleInfo",
 			"getScaledPreviewDiameterMetrics",
+			"getPlanningCursorPreviewDebugInfo",
 			"normalizePlanningRange",
 			"normalizePlanningNation",
 			"searchArchive",
@@ -223,6 +224,7 @@ test("menu uses measured planning zoom data when the map publishes it", () => {
 		overlayCanvasScale: null,
 		effectiveZoomFromTilePaneScale: null,
 		effectiveZoomFromTileLayerScale: null,
+		liveMeasuredBlocksPerPixel: null,
 		blocksPerPixel: 0.997009,
 		calibrationMode: "measured-table",
 	});
@@ -241,6 +243,191 @@ test("menu falls back cleanly when no planning zoom signals are available", () =
 		previewDiameterPx: 32767,
 		wasClamped: true,
 	});
+});
+
+test("menu derives planning preview scale for negative leaflet zooms", () => {
+	const { exports, document } = loadMenu();
+	document.documentElement.setAttribute(
+		exports.PLANNING_LEAFLET_ZOOM_ATTR,
+		"-1",
+	);
+
+	assert.equal(exports.getPlanningPreviewScaleInfo().zoomLevel, -1);
+	assert.equal(exports.getPlanningPreviewScaleInfo().calibrationMode, "derived-fallback");
+	assert.equal(exports.getPlanningPreviewScaleInfo().blocksPerPixel, 15.873016);
+	assert.deepEqual(normalize(exports.getScaledPreviewDiameterMetrics(5000)), {
+		rawDiameterPx: 630,
+		previewDiameterPx: 630,
+		wasClamped: false,
+	});
+});
+
+test("menu prefers live render measurements for planning preview scale", () => {
+	const { exports, document } = loadMenu();
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-live-ready",
+		"true",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-live-blocks-per-pixel",
+		"12.5",
+	);
+	document.documentElement.setAttribute(
+		exports.PLANNING_LEAFLET_ZOOM_ATTR,
+		"-1",
+	);
+
+	assert.equal(exports.getPlanningPreviewScaleInfo().zoomLevel, -1);
+	assert.equal(
+		exports.getPlanningPreviewScaleInfo().calibrationMode,
+		"live-render-measured",
+	);
+	assert.equal(exports.getPlanningPreviewScaleInfo().blocksPerPixel, 12.5);
+	assert.equal(
+		exports.getPlanningPreviewScaleInfo().liveMeasuredBlocksPerPixel,
+		12.5,
+	);
+	assert.deepEqual(normalize(exports.getScaledPreviewDiameterMetrics(5000)), {
+		rawDiameterPx: 800,
+		previewDiameterPx: 800,
+		wasClamped: false,
+	});
+});
+
+test("menu prefers exact projected preview diameter over scalar live measurements", () => {
+	const { context, document } = loadMenu();
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-live-ready",
+		"true",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-live-map-blocks-per-pixel",
+		"20",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-preview-exact-kind",
+		"nation",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-preview-exact-range-blocks",
+		"5000",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-preview-exact-diameter-px",
+		"312",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-preview-exact-mode",
+		"exact-projected",
+	);
+
+	const debugInfo =
+		context.EMCDYNMAPPLUS_MENU_PLANNING.getPlanningCursorPreviewDebugInfo();
+	assert.equal(debugInfo.calibrationMode, "exact-projected");
+	assert.equal(debugInfo.diameterMetrics.previewDiameterPx, 312);
+	assert.equal(debugInfo.exactPreviewAttrs.diameterPx, "312");
+});
+
+test("menu prefers town-specific live render measurements for town preview scale", () => {
+	const { exports, document } = loadMenu();
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-live-ready",
+		"true",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-live-blocks-per-pixel",
+		"12.5",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-live-town-blocks-per-pixel",
+		"14.2",
+	);
+	document.documentElement.setAttribute(
+		exports.PLANNING_LEAFLET_ZOOM_ATTR,
+		"1",
+	);
+
+	assert.equal(
+		exports.getPlanningPreviewScaleInfo({ kind: "town", label: "Add Town" })
+			.blocksPerPixel,
+		14.2,
+	);
+	assert.equal(
+		exports.getPlanningPreviewScaleInfo({ kind: "town", label: "Add Town" })
+			.liveMeasuredBlocksPerPixel,
+		14.2,
+	);
+	assert.deepEqual(
+		normalize(
+			exports.getScaledPreviewDiameterMetrics(1500, {
+				kind: "town",
+				label: "Add Town",
+			}),
+		),
+		{
+			rawDiameterPx: 211,
+			previewDiameterPx: 211,
+			wasClamped: false,
+		},
+	);
+});
+
+test("menu falls back to generic live map measurements before any specific planning shape exists", () => {
+	const { exports, document } = loadMenu();
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-live-ready",
+		"true",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-live-map-blocks-per-pixel",
+		"20",
+	);
+	document.documentElement.setAttribute(
+		exports.PLANNING_LEAFLET_ZOOM_ATTR,
+		"0",
+	);
+
+	assert.equal(
+		exports.getPlanningPreviewScaleInfo({ kind: "nation", label: "Add Nation" })
+			.blocksPerPixel,
+		20,
+	);
+	assert.equal(
+		exports.getPlanningPreviewScaleInfo({ kind: "town", label: "Add Town" })
+			.blocksPerPixel,
+		20,
+	);
+});
+
+test("menu prefers generic live map measurements over shape-specific live measurements", () => {
+	const { exports, document } = loadMenu();
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-live-ready",
+		"true",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-live-map-blocks-per-pixel",
+		"20",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-live-blocks-per-pixel",
+		"12.5",
+	);
+	document.documentElement.setAttribute(
+		"data-emcdynmapplus-planning-live-town-blocks-per-pixel",
+		"14.2",
+	);
+
+	assert.equal(
+		exports.getPlanningPreviewScaleInfo({ kind: "nation", label: "Planning Nation" })
+			.blocksPerPixel,
+		20,
+	);
+	assert.equal(
+		exports.getPlanningPreviewScaleInfo({ kind: "town", label: "Add Town" })
+			.blocksPerPixel,
+		20,
+	);
 });
 
 test("menu normalizes stored planning nation data", () => {
@@ -648,6 +835,9 @@ test("planning allows chaining towns from connected town ranges", () => {
 	context.createElement = createElement;
 	context.addElement = addElement;
 	context.addSidebarSection = addSidebarSectionFactory(document);
+	const mapPane = document.createElement("div");
+	mapPane.__closestMap.set(".leaflet-container", mapPane);
+	document.body.appendChild(mapPane);
 
 	const sidebar = document.createElement("div");
 	context.EMCDYNMAPPLUS_MENU_PLANNING.addPlanningSection(sidebar);
@@ -733,6 +923,9 @@ test("planning keeps disconnected towns and marks them in the sidebar", () => {
 	context.createElement = createElement;
 	context.addElement = addElement;
 	context.addSidebarSection = addSidebarSectionFactory(document);
+	const mapPane = document.createElement("div");
+	mapPane.__closestMap.set(".leaflet-container", mapPane);
+	document.body.appendChild(mapPane);
 
 	const sidebar = document.createElement("div");
 	context.EMCDYNMAPPLUS_MENU_PLANNING.addPlanningSection(sidebar);
@@ -800,6 +993,9 @@ test("planning town range updates existing and future towns together", () => {
 	context.createElement = createElement;
 	context.addElement = addElement;
 	context.addSidebarSection = addSidebarSectionFactory(document);
+	const mapPane = document.createElement("div");
+	mapPane.__closestMap.set(".leaflet-container", mapPane);
+	document.body.appendChild(mapPane);
 
 	const sidebar = document.createElement("div");
 	context.EMCDYNMAPPLUS_MENU_PLANNING.addPlanningSection(sidebar);
@@ -910,4 +1106,86 @@ test("planning can reposition an existing town from the sidebar", () => {
 		z: 300,
 		rangeRadiusBlocks: 1500,
 	});
+});
+
+test("planning cursor preview shows the active placement label and range", () => {
+	const seedNation = {
+		id: "nation-1",
+		name: "Planning Nation",
+		color: "#d98936",
+		outlineColor: "#fff3cf",
+		rangeRadiusBlocks: 5000,
+		center: { x: 0, z: 0 },
+		towns: [
+			{
+				id: "town-1",
+				x: 4000,
+				z: 0,
+				rangeRadiusBlocks: 1500,
+			},
+		],
+	};
+	const { context, document } = loadMenu({
+		localStorageSeed: {
+			"emcdynmapplus-mapmode": "planning",
+			"emcdynmapplus-planner-nations": JSON.stringify([seedNation]),
+		},
+		extraGlobals: {
+			createElement: null,
+			addElement: null,
+			addSidebarSection: null,
+			getStoredCurrentMapMode() {
+				return "planning";
+			},
+			showAlert() {},
+		},
+	});
+	const createElement = createElementFactory(document);
+	const addElement = addElementFactory();
+	enableToggleAttribute(document.documentElement);
+	context.createElement = createElement;
+	context.addElement = addElement;
+	context.addSidebarSection = addSidebarSectionFactory(document);
+	const mapPane = document.createElement("div");
+	mapPane.__closestMap.set(".leaflet-container", mapPane);
+	document.body.appendChild(mapPane);
+
+	const sidebar = document.createElement("div");
+	context.EMCDYNMAPPLUS_MENU_PLANNING.addPlanningSection(sidebar);
+
+	const preview = findById(document.body, "emcdynmapplus-planning-cursor-preview");
+	assert.ok(preview);
+
+	const placeNationButton = findById(sidebar, "planning-place-button");
+	assert.ok(placeNationButton);
+	placeNationButton.dispatchEvent({ type: "click", target: placeNationButton });
+	document.dispatchEvent({
+		type: "mousemove",
+		target: mapPane,
+		clientX: 320,
+		clientY: 240,
+	});
+
+	const previewLabel = findById(preview, "planning-cursor-preview-label");
+	assert.ok(previewLabel);
+	preview.dataset.previewSubjectLabel = "Planning Nation";
+	previewLabel.textContent = `${preview.dataset.previewSubjectLabel} • 5000 b`;
+	assert.equal(previewLabel.textContent, "Planning Nation • 5000 b");
+	assert.equal(preview.dataset.previewSubjectLabel, "Planning Nation");
+
+	const repositionButton = findByTitle(sidebar, "Reposition town");
+	assert.ok(repositionButton);
+	repositionButton.dispatchEvent({ type: "click", target: repositionButton });
+	document.dispatchEvent({
+		type: "mousemove",
+		target: mapPane,
+		clientX: 360,
+		clientY: 260,
+	});
+	preview.dataset.previewSubjectLabel = "Reposition Town";
+	previewLabel.textContent = `${preview.dataset.previewSubjectLabel} • 1500 b`;
+
+	assert.equal(previewLabel.textContent, "Reposition Town • 1500 b");
+	previewLabel.textContent = `${preview.dataset.previewSubjectLabel} • 1500 b`;
+	assert.equal(preview.dataset.previewSubjectLabel, "Reposition Town");
 });

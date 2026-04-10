@@ -9,6 +9,7 @@ function loadMarkerEngine(options = {}) {
 	return loadIifeScripts(
 		[
 			"resources/polygon-clipping.umd.min.js",
+			"resources/planning-geometry.js",
 			"resources/planning-leaflet-adapter.js",
 			"resources/planning-state.js",
 			"resources/planning-runtime.js",

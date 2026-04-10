@@ -3,6 +3,30 @@ const PLANNING_LIVE_RENDERER_KEY = "__EMCDYNMAPPLUS_PLANNING_LIVE_RENDERER__";
 if (globalThis[PLANNING_LIVE_RENDERER_KEY]) return;
 
 const PLANNING_LIVE_READY_ATTR = "data-emcdynmapplus-planning-live-ready";
+const PLANNING_LIVE_BLOCKS_PER_PIXEL_ATTR =
+	"data-emcdynmapplus-planning-live-blocks-per-pixel";
+const PLANNING_LIVE_TOWN_BLOCKS_PER_PIXEL_ATTR =
+	"data-emcdynmapplus-planning-live-town-blocks-per-pixel";
+const PLANNING_LIVE_MAP_BLOCKS_PER_PIXEL_ATTR =
+	"data-emcdynmapplus-planning-live-map-blocks-per-pixel";
+const PLANNING_PREVIEW_ACTIVE_ATTR =
+	"data-emcdynmapplus-planning-preview-active";
+const PLANNING_PREVIEW_KIND_ATTR =
+	"data-emcdynmapplus-planning-preview-kind";
+const PLANNING_PREVIEW_RANGE_BLOCKS_ATTR =
+	"data-emcdynmapplus-planning-preview-range-blocks";
+const PLANNING_PREVIEW_CLIENT_X_ATTR =
+	"data-emcdynmapplus-planning-preview-client-x";
+const PLANNING_PREVIEW_CLIENT_Y_ATTR =
+	"data-emcdynmapplus-planning-preview-client-y";
+const PLANNING_PREVIEW_EXACT_KIND_ATTR =
+	"data-emcdynmapplus-planning-preview-exact-kind";
+const PLANNING_PREVIEW_EXACT_RANGE_BLOCKS_ATTR =
+	"data-emcdynmapplus-planning-preview-exact-range-blocks";
+const PLANNING_PREVIEW_EXACT_DIAMETER_ATTR =
+	"data-emcdynmapplus-planning-preview-exact-diameter-px";
+const PLANNING_PREVIEW_EXACT_MODE_ATTR =
+	"data-emcdynmapplus-planning-preview-exact-mode";
 const PLANNING_LIVE_OVERLAY_ID = "emcdynmapplus-planning-live-overlay";
 const DEFAULT_COORDS_SELECTOR = ".leaflet-control-layers.coordinates";
 const PLANNING_STATE_UPDATED_EVENT = "EMCDYNMAPPLUS_PLANNING_STATE_UPDATED";
@@ -42,8 +66,6 @@ function createPlanningLiveRenderer({
 	liveOverlayId = PLANNING_LIVE_OVERLAY_ID,
 	coordsSelector = DEFAULT_COORDS_SELECTOR,
 	pageMapZoomAttr = DEFAULT_PAGE_MAP_ZOOM_ATTR,
-	planningCenterRadius = 48,
-	planningTownMarkerRadius = 28,
 	createPlanningCircleVertices,
 	createPlanningRangeMultiPolygon = null,
 	planningLeafletAdapter = null,
@@ -56,6 +78,14 @@ function createPlanningLiveRenderer({
 	if (typeof createPlanningCircleVertices !== "function") {
 		throw new Error("planning live renderer requires createPlanningCircleVertices");
 	}
+	const planningGeometryFactory =
+		globalThis.__EMCDYNMAPPLUS_PLANNING_GEOMETRY__?.createPlanningGeometry;
+	if (typeof planningGeometryFactory !== "function") {
+		throw new Error("planning live renderer requires planning geometry helpers");
+	}
+	const planningGeometry = planningGeometryFactory({
+		createPlanningCircleVertices,
+	});
 
 	let renderFrame = 0;
 	let panCaptureFrame = 0;
@@ -104,6 +134,224 @@ function createPlanningLiveRenderer({
 
 		if (ready) root.setAttribute(liveReadyAttr, "true");
 		else root.removeAttribute(liveReadyAttr);
+	}
+
+	function setLiveBlocksPerPixel(blocksPerPixel = null) {
+		const root = document.documentElement;
+		if (!(root instanceof HTMLElement)) return;
+
+		const numericValue = Number(blocksPerPixel);
+		if (Number.isFinite(numericValue) && numericValue > 0) {
+			root.setAttribute(
+				PLANNING_LIVE_BLOCKS_PER_PIXEL_ATTR,
+				String(Number(numericValue.toFixed(6))),
+			);
+		} else {
+			root.removeAttribute(PLANNING_LIVE_BLOCKS_PER_PIXEL_ATTR);
+		}
+	}
+
+	function setLiveTownBlocksPerPixel(blocksPerPixel = null) {
+		const root = document.documentElement;
+		if (!(root instanceof HTMLElement)) return;
+
+		const numericValue = Number(blocksPerPixel);
+		if (Number.isFinite(numericValue) && numericValue > 0) {
+			root.setAttribute(
+				PLANNING_LIVE_TOWN_BLOCKS_PER_PIXEL_ATTR,
+				String(Number(numericValue.toFixed(6))),
+			);
+		} else {
+			root.removeAttribute(PLANNING_LIVE_TOWN_BLOCKS_PER_PIXEL_ATTR);
+		}
+	}
+
+	function setLiveMapBlocksPerPixel(blocksPerPixel = null) {
+		const root = document.documentElement;
+		if (!(root instanceof HTMLElement)) return;
+
+		const numericValue = Number(blocksPerPixel);
+		if (Number.isFinite(numericValue) && numericValue > 0) {
+			root.setAttribute(
+				PLANNING_LIVE_MAP_BLOCKS_PER_PIXEL_ATTR,
+				String(Number(numericValue.toFixed(6))),
+			);
+		} else {
+			root.removeAttribute(PLANNING_LIVE_MAP_BLOCKS_PER_PIXEL_ATTR);
+		}
+	}
+
+	function clearExactPreviewMetrics() {
+		const root = document.documentElement;
+		if (!(root instanceof HTMLElement)) return;
+		root.removeAttribute(PLANNING_PREVIEW_EXACT_KIND_ATTR);
+		root.removeAttribute(PLANNING_PREVIEW_EXACT_RANGE_BLOCKS_ATTR);
+		root.removeAttribute(PLANNING_PREVIEW_EXACT_DIAMETER_ATTR);
+		root.removeAttribute(PLANNING_PREVIEW_EXACT_MODE_ATTR);
+	}
+
+	function setExactPreviewMetrics({
+		kind = null,
+		rangeRadiusBlocks = null,
+		diameterPx = null,
+		mode = "exact-projected",
+	} = {}) {
+		const root = document.documentElement;
+		if (!(root instanceof HTMLElement)) return;
+
+		const diameter = Number(diameterPx);
+		const range = Number(rangeRadiusBlocks);
+		if (!Number.isFinite(diameter) || diameter <= 0) {
+			clearExactPreviewMetrics();
+			return;
+		}
+
+		if (typeof kind === "string" && kind) {
+			root.setAttribute(PLANNING_PREVIEW_EXACT_KIND_ATTR, kind);
+		} else {
+			root.removeAttribute(PLANNING_PREVIEW_EXACT_KIND_ATTR);
+		}
+		if (Number.isFinite(range) && range >= 0) {
+			root.setAttribute(
+				PLANNING_PREVIEW_EXACT_RANGE_BLOCKS_ATTR,
+				String(Math.round(range)),
+			);
+		} else {
+			root.removeAttribute(PLANNING_PREVIEW_EXACT_RANGE_BLOCKS_ATTR);
+		}
+		root.setAttribute(
+			PLANNING_PREVIEW_EXACT_DIAMETER_ATTR,
+			String(Math.round(diameter)),
+		);
+		root.setAttribute(PLANNING_PREVIEW_EXACT_MODE_ATTR, String(mode || ""));
+	}
+
+	function readActivePreviewRequest() {
+		const root = document.documentElement;
+		if (!(root instanceof HTMLElement)) return null;
+		if (root.getAttribute(PLANNING_PREVIEW_ACTIVE_ATTR) !== "true") return null;
+
+		const kind = root.getAttribute(PLANNING_PREVIEW_KIND_ATTR) || null;
+		const rangeRadiusBlocks = Number(
+			root.getAttribute(PLANNING_PREVIEW_RANGE_BLOCKS_ATTR),
+		);
+		const clientX = Number(root.getAttribute(PLANNING_PREVIEW_CLIENT_X_ATTR));
+		const clientY = Number(root.getAttribute(PLANNING_PREVIEW_CLIENT_Y_ATTR));
+		if (
+			(kind !== "nation" && kind !== "town") ||
+			!Number.isFinite(rangeRadiusBlocks) ||
+			rangeRadiusBlocks < 0 ||
+			!Number.isFinite(clientX) ||
+			!Number.isFinite(clientY)
+		) {
+			return null;
+		}
+
+		return {
+			kind,
+			rangeRadiusBlocks,
+			clientX,
+			clientY,
+		};
+	}
+
+	function computeBlocksPerPixelFromScreenPerWorld(screenPerWorld = null) {
+		const xx = Number(screenPerWorld?.xx);
+		const xz = Number(screenPerWorld?.xz);
+		const yx = Number(screenPerWorld?.yx);
+		const yz = Number(screenPerWorld?.yz);
+		const horizontalPxPerBlock = Math.hypot(xx, xz);
+		const verticalPxPerBlock = Math.hypot(yx, yz);
+		const pxPerBlock = Math.max(horizontalPxPerBlock, verticalPxPerBlock);
+		return Number.isFinite(pxPerBlock) && pxPerBlock > 0
+			? 1 / pxPerBlock
+			: null;
+	}
+
+	function computeLeafletNativeBlocksPerPixel(map = null) {
+		if (!planningLeafletAdapter?.canProjectWithMap?.(map)) return null;
+		if (typeof planningLeafletAdapter.latLngToWorld !== "function") return null;
+
+		const centerLatLng = safeMapCall(map, "getCenter");
+		const centerWorld = planningLeafletAdapter.latLngToWorld(centerLatLng);
+		if (!centerWorld) return null;
+
+		const centerPoint = projectWorldPointViaLeaflet(centerWorld, map);
+		const xPoint = projectWorldPointViaLeaflet(
+			{ x: centerWorld.x + 1, z: centerWorld.z },
+			map,
+		);
+		const zPoint = projectWorldPointViaLeaflet(
+			{ x: centerWorld.x, z: centerWorld.z + 1 },
+			map,
+		);
+		if (!centerPoint || !xPoint || !zPoint) return null;
+
+		return computeBlocksPerPixelFromScreenPerWorld({
+			xx: xPoint.x - centerPoint.x,
+			xz: zPoint.x - centerPoint.x,
+			yx: xPoint.y - centerPoint.y,
+			yz: zPoint.y - centerPoint.y,
+		});
+	}
+
+	function getPreviewCenterWorldPoint(previewRequest, map = null) {
+		if (!previewRequest) {
+			return null;
+		}
+		if (map && typeof map.containerPointToLatLng === "function") {
+			const container = map.getContainer?.();
+			if (container instanceof HTMLElement) {
+				const rect = container.getBoundingClientRect();
+				const containerPoint = {
+					x: previewRequest.clientX - rect.left,
+					y: previewRequest.clientY - rect.top,
+				};
+				let latLng = null;
+				try {
+					latLng = map.containerPointToLatLng(containerPoint) ?? null;
+				} catch {
+					latLng = null;
+				}
+				const worldPoint = planningLeafletAdapter?.latLngToWorld?.(latLng) ?? null;
+				if (worldPoint) return worldPoint;
+			}
+		}
+
+		const mapContainer = getMapContainer();
+		if (!(mapContainer instanceof HTMLElement)) return null;
+		return getSampleWorldPoint()?.(
+			previewRequest.clientX,
+			previewRequest.clientY,
+			mapContainer,
+		) ?? null;
+	}
+
+	function getProjectedPreviewDiameter({
+		previewRequest = null,
+		map = null,
+		transform = null,
+		nativeProjectionAvailable = false,
+	} = {}) {
+		if (!previewRequest) return null;
+		const centerWorld = getPreviewCenterWorldPoint(previewRequest, map);
+		if (!centerWorld) return null;
+
+		const projectWorldPoint = nativeProjectionAvailable
+			? (point) => projectWorldPointViaLeaflet(point, map)
+			: (point) => projectWorldPointToOverlay(point, transform, map);
+		const bounds = planningGeometry.getProjectedCircleBounds({
+			center: centerWorld,
+			rangeRadiusBlocks: previewRequest.rangeRadiusBlocks,
+			projector: projectWorldPoint,
+		});
+		if (!bounds) return null;
+
+		return {
+			centerWorld,
+			bounds,
+			diameterPx: Math.max(bounds.width, bounds.height),
+		};
 	}
 
 	function isLiveReady() {
@@ -789,32 +1037,7 @@ function createPlanningLiveRenderer({
 	}
 
 	function computeBounds(points) {
-		if (!Array.isArray(points) || points.length === 0) return null;
-
-		let minX = Number.POSITIVE_INFINITY;
-		let minY = Number.POSITIVE_INFINITY;
-		let maxX = Number.NEGATIVE_INFINITY;
-		let maxY = Number.NEGATIVE_INFINITY;
-
-		for (const point of points) {
-			const x = Number(point?.x);
-			const y = Number(point?.y);
-			if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-			if (x < minX) minX = x;
-			if (y < minY) minY = y;
-			if (x > maxX) maxX = x;
-			if (y > maxY) maxY = y;
-		}
-
-		if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
-		return {
-			left: minX,
-			top: minY,
-			right: maxX,
-			bottom: maxY,
-			width: maxX - minX,
-			height: maxY - minY,
-		};
+		return planningGeometry.computeBounds(points);
 	}
 
 	function normalizeNation(nation, index = 0) {
@@ -1140,10 +1363,7 @@ function createPlanningLiveRenderer({
 	}
 
 	function flattenPolygons(polygons) {
-		if (!Array.isArray(polygons)) return [];
-		return polygons.flatMap((polygon) =>
-			Array.isArray(polygon) ? polygon.flatMap((ring) => ring) : [],
-		);
+		return planningGeometry.flattenPolygons(polygons);
 	}
 
 	function createBoundsPointsForCircle(centerPoint, radiusPx) {
@@ -1228,23 +1448,11 @@ function createPlanningLiveRenderer({
 	}
 
 	function projectWorldRing(points, projector) {
-		if (!Array.isArray(points) || typeof projector !== "function") return [];
-		return points
-			.map((point) => projector(point))
-			.filter((point) => point != null);
+		return planningGeometry.projectWorldRing(points, projector);
 	}
 
 	function projectWorldMultiPolygon(polygons, projector) {
-		if (!Array.isArray(polygons) || typeof projector !== "function") return [];
-		return polygons
-			.map((polygon) =>
-				Array.isArray(polygon)
-					? polygon
-						.map((ring) => projectWorldRing(ring, projector))
-						.filter((ring) => ring.length >= 3)
-					: [],
-			)
-			.filter((polygon) => polygon.length > 0);
+		return planningGeometry.projectWorldMultiPolygon(polygons, projector);
 	}
 
 	function scheduleRender(reason = "unspecified") {
@@ -1547,10 +1755,9 @@ function createPlanningLiveRenderer({
 
 		rootObserver = new MutationObserver((mutations) => {
 			for (const mutation of mutations) {
-				if (
-					mutation.type === "attributes" &&
-					mutation.attributeName === pageMapZoomAttr
-				) {
+				if (mutation.type !== "attributes") continue;
+
+				if (mutation.attributeName === pageMapZoomAttr) {
 					const nextZoomAttr =
 						document.documentElement?.getAttribute?.(pageMapZoomAttr) ?? null;
 					if (nextZoomAttr === lastObservedRootZoomAttr) {
@@ -1570,11 +1777,29 @@ function createPlanningLiveRenderer({
 					}
 					break;
 				}
+
+				if (
+					mutation.attributeName === PLANNING_PREVIEW_ACTIVE_ATTR ||
+					mutation.attributeName === PLANNING_PREVIEW_KIND_ATTR ||
+					mutation.attributeName === PLANNING_PREVIEW_RANGE_BLOCKS_ATTR ||
+					mutation.attributeName === PLANNING_PREVIEW_CLIENT_X_ATTR ||
+					mutation.attributeName === PLANNING_PREVIEW_CLIENT_Y_ATTR
+				) {
+					scheduleRender("preview-request-updated");
+					break;
+				}
 			}
 		});
 		rootObserver.observe(root, {
 			attributes: true,
-			attributeFilter: [pageMapZoomAttr],
+			attributeFilter: [
+				pageMapZoomAttr,
+				PLANNING_PREVIEW_ACTIVE_ATTR,
+				PLANNING_PREVIEW_KIND_ATTR,
+				PLANNING_PREVIEW_RANGE_BLOCKS_ATTR,
+				PLANNING_PREVIEW_CLIENT_X_ATTR,
+				PLANNING_PREVIEW_CLIENT_Y_ATTR,
+			],
 		});
 		lastObservedRootZoomAttr = root.getAttribute(pageMapZoomAttr);
 	}
@@ -1643,6 +1868,10 @@ function createPlanningLiveRenderer({
 		if (!(mapContainer instanceof HTMLElement)) {
 			lastRenderState = { ok: false, reason: "missing-map-container", projectionMode, nations: [] };
 			setLiveReady(false);
+			setLiveBlocksPerPixel(null);
+			setLiveTownBlocksPerPixel(null);
+			setLiveMapBlocksPerPixel(null);
+			clearExactPreviewMetrics();
 			recordDebug("render-failed", {
 				trigger: lastRenderTrigger,
 				reason: lastRenderState.reason,
@@ -1654,6 +1883,10 @@ function createPlanningLiveRenderer({
 		if (!(overlayHost instanceof HTMLElement)) {
 			lastRenderState = { ok: false, reason: "missing-overlay-host", projectionMode, nations: [] };
 			setLiveReady(false);
+			setLiveBlocksPerPixel(null);
+			setLiveTownBlocksPerPixel(null);
+			setLiveMapBlocksPerPixel(null);
+			clearExactPreviewMetrics();
 			recordDebug("render-failed", {
 				trigger: lastRenderTrigger,
 				reason: lastRenderState.reason,
@@ -1665,6 +1898,10 @@ function createPlanningLiveRenderer({
 		if (!(overlay instanceof Element)) {
 			lastRenderState = { ok: false, reason: "missing-overlay", projectionMode, nations: [] };
 			setLiveReady(false);
+			setLiveBlocksPerPixel(null);
+			setLiveTownBlocksPerPixel(null);
+			setLiveMapBlocksPerPixel(null);
+			clearExactPreviewMetrics();
 			recordDebug("render-failed", {
 				trigger: lastRenderTrigger,
 				reason: lastRenderState.reason,
@@ -1676,6 +1913,10 @@ function createPlanningLiveRenderer({
 		if (!isPlanningModeActive()) {
 			clearOverlay(overlay);
 			clearZoomAnimationSync(overlay);
+			setLiveBlocksPerPixel(null);
+			setLiveTownBlocksPerPixel(null);
+			setLiveMapBlocksPerPixel(null);
+			clearExactPreviewMetrics();
 			lastRenderState = { ok: true, reason: "inactive-map-mode", projectionMode, nations: [] };
 			recordDebug("render-skipped", {
 				trigger: lastRenderTrigger,
@@ -1693,6 +1934,10 @@ function createPlanningLiveRenderer({
 			clearZoomAnimationSync(overlay);
 			lastRenderState = { ok: false, reason: transform.reason, projectionMode, nations: [] };
 			setLiveReady(false);
+			setLiveBlocksPerPixel(null);
+			setLiveTownBlocksPerPixel(null);
+			setLiveMapBlocksPerPixel(null);
+			clearExactPreviewMetrics();
 			recordDebug("render-failed", {
 				trigger: lastRenderTrigger,
 				reason: lastRenderState.reason,
@@ -1707,11 +1952,35 @@ function createPlanningLiveRenderer({
 		const nations = getPlanningNations()
 			.map((nation, index) => normalizeNation(nation, index))
 			.filter((nation) => nation != null);
+		const liveMapBlocksPerPixel = nativeProjectionAvailable
+			? computeLeafletNativeBlocksPerPixel(map)
+			: computeBlocksPerPixelFromScreenPerWorld(transform?.screenPerWorld);
+		setLiveMapBlocksPerPixel(liveMapBlocksPerPixel);
+		const previewRequest = readActivePreviewRequest();
+		const projectedPreview = getProjectedPreviewDiameter({
+			previewRequest,
+			map,
+			transform,
+			nativeProjectionAvailable,
+		});
+		if (projectedPreview?.diameterPx > 0) {
+			setExactPreviewMetrics({
+				kind: previewRequest?.kind ?? null,
+				rangeRadiusBlocks: previewRequest?.rangeRadiusBlocks ?? null,
+				diameterPx: projectedPreview.diameterPx,
+				mode: "exact-projected",
+			});
+		} else {
+			clearExactPreviewMetrics();
+		}
+
 		if (nations.length === 0) {
 			clearOverlay(overlay);
 			clearZoomAnimationSync(overlay);
 			lastRenderState = { ok: true, reason: "no-nations", projectionMode, nations: [] };
 			setLiveReady(true);
+			setLiveBlocksPerPixel(null);
+			setLiveTownBlocksPerPixel(null);
 			recordDebug("render-complete", {
 				trigger: lastRenderTrigger,
 				reason: lastRenderState.reason,
@@ -1723,6 +1992,7 @@ function createPlanningLiveRenderer({
 
 		const nextChildren = [];
 		const measurements = [];
+		const townMeasurements = [];
 		const projectedShapes = [];
 		const markerMetrics = getZoomAwareMarkerMetrics(effectiveZoom);
 		const projectWorldPoint = (point) =>
@@ -1733,12 +2003,17 @@ function createPlanningLiveRenderer({
 		for (const nation of nations) {
 			const connectivity = getPlanningTownConnectivity(nation);
 			const connectedNation = connectivity.nation ?? nation;
+			const baseRangePolygon = [[createPlanningCircleVertices(
+				connectedNation.center,
+				connectedNation.rangeRadiusBlocks,
+			)]];
 			const rangePolygon = typeof createPlanningRangeMultiPolygon === "function"
 				? createPlanningRangeMultiPolygon(connectedNation)
-				: [[createPlanningCircleVertices(
-					connectedNation.center,
-					connectedNation.rangeRadiusBlocks,
-				)]];
+				: baseRangePolygon;
+			const projectedBaseRangePolygon = projectWorldMultiPolygon(
+				baseRangePolygon,
+				projectWorldPoint,
+			);
 			const projectedRangePolygon = projectWorldMultiPolygon(
 				rangePolygon,
 				projectWorldPoint,
@@ -1785,8 +2060,20 @@ function createPlanningLiveRenderer({
 				rangeRadiusBlocks: connectedNation.rangeRadiusBlocks,
 				townCount: connectedNation.towns.length,
 				disconnectedTownCount: connectivity.disconnectedTowns.length,
+				previewRangeBounds: computeBounds(
+					flattenPolygons(projectedBaseRangePolygon),
+				),
 				rangeBounds: computeBounds(rangePoints),
 			});
+			townMeasurements.push(
+				...projectedTownRangeHighlights.map((townRange) => ({
+					id: townRange.town.id,
+					nationId: connectedNation.id,
+					rangeRadiusBlocks: townRange.town.rangeRadiusBlocks,
+					isDisconnected: townRange.isDisconnected,
+					rangeBounds: computeBounds(flattenPolygons(townRange.polygons)),
+				})),
+			);
 			projectedShapes.push({
 				nation: connectedNation,
 				rangePolygon: projectedRangePolygon,
@@ -1831,6 +2118,10 @@ function createPlanningLiveRenderer({
 			clearZoomAnimationSync(overlay);
 			lastRenderState = { ok: false, reason: "invalid-projected-bounds", projectionMode, nations: [] };
 			setLiveReady(false);
+			setLiveBlocksPerPixel(null);
+			setLiveTownBlocksPerPixel(null);
+			setLiveMapBlocksPerPixel(null);
+			clearExactPreviewMetrics();
 			recordDebug("render-failed", {
 				trigger: lastRenderTrigger,
 				reason: lastRenderState.reason,
@@ -2030,6 +2321,56 @@ function createPlanningLiveRenderer({
 		updateHoveredTownVisual();
 		overlay.hidden = false;
 		clearZoomAnimationSync(overlay);
+		const primaryMeasurement = measurements.find((measurement) => {
+			const renderedDiameter = Math.max(
+				Number(measurement?.previewRangeBounds?.width),
+				Number(measurement?.previewRangeBounds?.height),
+				Number(measurement?.rangeBounds?.width),
+				Number(measurement?.rangeBounds?.height),
+			);
+			const rangeRadiusBlocks = Number(measurement?.rangeRadiusBlocks);
+			return Number.isFinite(renderedDiameter)
+				&& renderedDiameter > 0
+				&& Number.isFinite(rangeRadiusBlocks)
+				&& rangeRadiusBlocks > 0;
+		});
+		const liveBlocksPerPixel = primaryMeasurement
+			? (() => {
+				const previewDiameter = Math.max(
+					Number(primaryMeasurement.previewRangeBounds?.width) || 0,
+					Number(primaryMeasurement.previewRangeBounds?.height) || 0,
+				);
+				const mergedDiameter = Math.max(
+					Number(primaryMeasurement.rangeBounds?.width) || 0,
+					Number(primaryMeasurement.rangeBounds?.height) || 0,
+				);
+				const renderedDiameter = previewDiameter > 0
+					? previewDiameter
+					: Math.max(mergedDiameter, 1);
+				return (primaryMeasurement.rangeRadiusBlocks * 2) / renderedDiameter;
+			})()
+			: null;
+		const primaryTownMeasurement = townMeasurements.find((measurement) => {
+			const renderedDiameter = Math.max(
+				Number(measurement?.rangeBounds?.width),
+				Number(measurement?.rangeBounds?.height),
+			);
+			const rangeRadiusBlocks = Number(measurement?.rangeRadiusBlocks);
+			return Number.isFinite(renderedDiameter)
+				&& renderedDiameter > 0
+				&& Number.isFinite(rangeRadiusBlocks)
+				&& rangeRadiusBlocks > 0;
+		});
+		const liveTownBlocksPerPixel = primaryTownMeasurement
+			? (primaryTownMeasurement.rangeRadiusBlocks * 2)
+				/ Math.max(
+					primaryTownMeasurement.rangeBounds.width,
+					primaryTownMeasurement.rangeBounds.height,
+					1,
+				)
+			: null;
+		setLiveBlocksPerPixel(liveBlocksPerPixel);
+		setLiveTownBlocksPerPixel(liveTownBlocksPerPixel);
 		lastRenderState = {
 			ok: true,
 			reason: null,
@@ -2116,6 +2457,7 @@ function createPlanningLiveRenderer({
 	}
 
 		return {
+			PLANNING_LIVE_BLOCKS_PER_PIXEL_ATTR,
 			PLANNING_LIVE_READY_ATTR: liveReadyAttr,
 			init,
 			render,

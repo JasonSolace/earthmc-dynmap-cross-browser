@@ -91,6 +91,7 @@ const {
 	parseZoomFromTileUrl,
 	getPlanningPreviewScaleInfo,
 	getScaledPreviewDiameterMetrics,
+	getPlanningCursorPreviewDebugInfo,
 	normalizePlanningRange,
 	normalizePlanningNation,
 	setPlanningPlacementArmed,

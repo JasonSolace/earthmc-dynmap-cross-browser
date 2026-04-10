@@ -39,6 +39,11 @@ function createMarkerEnginePlanning({
 	if (typeof planningProjectionFactory !== "function") {
 		throw new Error("marker-engine planning helpers require planning projection helpers");
 	}
+	const planningGeometryFactory =
+		globalThis.__EMCDYNMAPPLUS_PLANNING_GEOMETRY__?.createPlanningGeometry;
+	if (typeof planningGeometryFactory !== "function") {
+		throw new Error("marker-engine planning helpers require planning geometry helpers");
+	}
 	const planningLeafletAdapterFactory =
 		globalThis.__EMCDYNMAPPLUS_PLANNING_LEAFLET_ADAPTER__?.createPlanningLeafletAdapter;
 	if (typeof planningLeafletAdapterFactory !== "function") {
@@ -80,6 +85,7 @@ function createMarkerEnginePlanning({
 		mapType: currentMapType,
 		projectionModel: planningLeafletProjection,
 	});
+	const planningGeometry = planningGeometryFactory();
 	planningRuntime.init();
 	globalThis.EMCDYNMAPPLUS_PAGE_PLANNING_RUNTIME = planningRuntime;
 	const planningLiveRenderer = planningLiveRendererFactory({
@@ -229,16 +235,11 @@ function createMarkerEnginePlanning({
 	}
 
 	function createPlanningCircleVertices(point, radiusBlocks, segments = 96) {
-		const polygon = [];
-		for (let i = 0; i < segments; i++) {
-			const angle = (Math.PI * 2 * i) / segments;
-			polygon.push({
-				x: point.x + Math.cos(angle) * radiusBlocks,
-				z: point.z + Math.sin(angle) * radiusBlocks,
-			});
-		}
-
-		return polygon;
+		return planningGeometry.createPlanningCircleVertices(
+			point,
+			radiusBlocks,
+			segments,
+		);
 	}
 
 	function createPlanningCircleRing(point, radiusBlocks, segments = 128) {
@@ -652,6 +653,8 @@ function createMarkerEnginePlanning({
 	function getPlanningRenderMeasurements(options = {}) {
 		const liveMeasurement = planningLiveRenderer.measureRenderedNation(options);
 		if (liveMeasurement?.rangeBounds) {
+			const measurementBounds =
+				liveMeasurement.previewRangeBounds ?? liveMeasurement.rangeBounds;
 			const tileZoom = readNumericRootAttribute(pageTileZoomAttr);
 			return {
 				ok: true,
@@ -667,26 +670,26 @@ function createMarkerEnginePlanning({
 				rangeMeasurement: {
 					ok: true,
 					cssBounds: {
-						left: Number(liveMeasurement.rangeBounds.left.toFixed(2)),
-						top: Number(liveMeasurement.rangeBounds.top.toFixed(2)),
-						right: Number(liveMeasurement.rangeBounds.right.toFixed(2)),
-						bottom: Number(liveMeasurement.rangeBounds.bottom.toFixed(2)),
-						width: Number(liveMeasurement.rangeBounds.width.toFixed(2)),
-						height: Number(liveMeasurement.rangeBounds.height.toFixed(2)),
+						left: Number(measurementBounds.left.toFixed(2)),
+						top: Number(measurementBounds.top.toFixed(2)),
+						right: Number(measurementBounds.right.toFixed(2)),
+						bottom: Number(measurementBounds.bottom.toFixed(2)),
+						width: Number(measurementBounds.width.toFixed(2)),
+						height: Number(measurementBounds.height.toFixed(2)),
 					},
 				},
 				renderedDiameterPx: Number(
 					Math.max(
-						liveMeasurement.rangeBounds.width,
-						liveMeasurement.rangeBounds.height,
+						measurementBounds.width,
+						measurementBounds.height,
 					).toFixed(2),
 				),
 				blocksPerPixel: Number(
 					(
 						(liveMeasurement.rangeRadiusBlocks * 2) /
 						Math.max(
-							liveMeasurement.rangeBounds.width,
-							liveMeasurement.rangeBounds.height,
+							measurementBounds.width,
+							measurementBounds.height,
 							1,
 						)
 					).toFixed(6),

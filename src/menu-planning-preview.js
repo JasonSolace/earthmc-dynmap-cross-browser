@@ -20,11 +20,12 @@
 	)
 		.map((value) => Number(value))
 		.filter(Number.isFinite);
-	const PLANNING_PREVIEW_MIN_ZOOM = Math.min(...PLANNING_PREVIEW_ZOOM_LEVELS);
+	const PLANNING_PREVIEW_MIN_ZOOM = -2;
 	const PLANNING_PREVIEW_MAX_ZOOM = Math.max(...PLANNING_PREVIEW_ZOOM_LEVELS);
 	const PLANNING_PREVIEW_FALLBACK_BLOCKS_PER_PIXEL =
 		PLANNING_PREVIEW_BLOCKS_PER_PIXEL_BY_ZOOM[1];
 	const PLANNING_PREVIEW_FALLBACK_ZOOM = 1;
+	const PLANNING_PREVIEW_MAX_DIAMETER_PX = 32767;
 	const PLANNING_LEAFLET_ZOOM_ATTR = "data-emcdynmapplus-leaflet-zoom";
 	const PLANNING_LEAFLET_MAP_CONTAINER_ATTR =
 		"data-emcdynmapplus-leaflet-map-container";
@@ -33,6 +34,31 @@
 	const PLANNING_TILE_DOMINANT_ZOOM_ATTR =
 		"data-emcdynmapplus-tile-dominant-zoom";
 	const PLANNING_TILE_SUMMARY_ATTR = "data-emcdynmapplus-tile-zoom-summary";
+	const PLANNING_LIVE_READY_ATTR = "data-emcdynmapplus-planning-live-ready";
+	const PLANNING_LIVE_BLOCKS_PER_PIXEL_ATTR =
+		"data-emcdynmapplus-planning-live-blocks-per-pixel";
+	const PLANNING_LIVE_TOWN_BLOCKS_PER_PIXEL_ATTR =
+		"data-emcdynmapplus-planning-live-town-blocks-per-pixel";
+	const PLANNING_LIVE_MAP_BLOCKS_PER_PIXEL_ATTR =
+		"data-emcdynmapplus-planning-live-map-blocks-per-pixel";
+	const PLANNING_PREVIEW_ACTIVE_ATTR =
+		"data-emcdynmapplus-planning-preview-active";
+	const PLANNING_PREVIEW_KIND_ATTR =
+		"data-emcdynmapplus-planning-preview-kind";
+	const PLANNING_PREVIEW_RANGE_BLOCKS_ATTR =
+		"data-emcdynmapplus-planning-preview-range-blocks";
+	const PLANNING_PREVIEW_CLIENT_X_ATTR =
+		"data-emcdynmapplus-planning-preview-client-x";
+	const PLANNING_PREVIEW_CLIENT_Y_ATTR =
+		"data-emcdynmapplus-planning-preview-client-y";
+	const PLANNING_PREVIEW_EXACT_KIND_ATTR =
+		"data-emcdynmapplus-planning-preview-exact-kind";
+	const PLANNING_PREVIEW_EXACT_RANGE_BLOCKS_ATTR =
+		"data-emcdynmapplus-planning-preview-exact-range-blocks";
+	const PLANNING_PREVIEW_EXACT_DIAMETER_ATTR =
+		"data-emcdynmapplus-planning-preview-exact-diameter-px";
+	const PLANNING_PREVIEW_EXACT_MODE_ATTR =
+		"data-emcdynmapplus-planning-preview-exact-mode";
 	const planningProjectionFactory =
 		globalThis.__EMCDYNMAPPLUS_PLANNING_PROJECTION__?.createPlanningProjectionAdapter;
 	if (typeof planningProjectionFactory !== "function") {
@@ -92,6 +118,7 @@
 		let planningCursorPreviewRuntimeZoomSource = null;
 		let planningCursorPreviewLastWheelAt = 0;
 		let planningCursorPreviewLastLogSignature = null;
+		let planningCursorPreviewLastPointer = null;
 		const planningProjection = planningProjectionFactory({
 			pageMapZoomAttr: PLANNING_LEAFLET_ZOOM_ATTR,
 			pageMapContainerAttr: PLANNING_LEAFLET_MAP_CONTAINER_ATTR,
@@ -189,8 +216,174 @@
 			return projectionSignals;
 		}
 
-		function getPlanningPreviewScaleInfo() {
+		function getPreviewSubjectKind(previewSubject = null) {
+			if (previewSubject?.kind === "town" || previewSubject?.kind === "nation") {
+				return previewSubject.kind;
+			}
+			const label = typeof previewSubject?.label === "string"
+				? previewSubject.label.toLowerCase()
+				: "";
+			if (label.includes("town")) return "town";
+			return "nation";
+		}
+
+		function clearPlanningCursorPreviewRequest() {
+			const root = document.documentElement;
+			if (!(root instanceof HTMLElement)) return;
+			if (root.getAttribute(PLANNING_PREVIEW_ACTIVE_ATTR) != null) {
+				root.removeAttribute(PLANNING_PREVIEW_ACTIVE_ATTR);
+			}
+			if (root.getAttribute(PLANNING_PREVIEW_KIND_ATTR) != null) {
+				root.removeAttribute(PLANNING_PREVIEW_KIND_ATTR);
+			}
+			if (root.getAttribute(PLANNING_PREVIEW_RANGE_BLOCKS_ATTR) != null) {
+				root.removeAttribute(PLANNING_PREVIEW_RANGE_BLOCKS_ATTR);
+			}
+			if (root.getAttribute(PLANNING_PREVIEW_CLIENT_X_ATTR) != null) {
+				root.removeAttribute(PLANNING_PREVIEW_CLIENT_X_ATTR);
+			}
+			if (root.getAttribute(PLANNING_PREVIEW_CLIENT_Y_ATTR) != null) {
+				root.removeAttribute(PLANNING_PREVIEW_CLIENT_Y_ATTR);
+			}
+		}
+
+		function publishPlanningCursorPreviewRequest({
+			previewSubject = null,
+			rangeRadiusBlocks = null,
+			clientX = null,
+			clientY = null,
+		} = {}) {
+			const root = document.documentElement;
+			if (!(root instanceof HTMLElement)) return;
+
+			const kind = getPreviewSubjectKind(previewSubject);
+			const range = normalizePlanningRange(rangeRadiusBlocks);
+			if (root.getAttribute(PLANNING_PREVIEW_ACTIVE_ATTR) !== "true") {
+				root.setAttribute(PLANNING_PREVIEW_ACTIVE_ATTR, "true");
+			}
+			if (root.getAttribute(PLANNING_PREVIEW_KIND_ATTR) !== kind) {
+				root.setAttribute(PLANNING_PREVIEW_KIND_ATTR, kind);
+			}
+			if (range != null) {
+				if (
+					root.getAttribute(PLANNING_PREVIEW_RANGE_BLOCKS_ATTR) !==
+					String(range)
+				) {
+					root.setAttribute(PLANNING_PREVIEW_RANGE_BLOCKS_ATTR, String(range));
+				}
+			} else {
+				root.removeAttribute(PLANNING_PREVIEW_RANGE_BLOCKS_ATTR);
+			}
+			if (Number.isFinite(clientX) && Number.isFinite(clientY)) {
+				if (root.getAttribute(PLANNING_PREVIEW_CLIENT_X_ATTR) !== String(clientX)) {
+					root.setAttribute(PLANNING_PREVIEW_CLIENT_X_ATTR, String(clientX));
+				}
+				if (root.getAttribute(PLANNING_PREVIEW_CLIENT_Y_ATTR) !== String(clientY)) {
+					root.setAttribute(PLANNING_PREVIEW_CLIENT_Y_ATTR, String(clientY));
+				}
+			}
+		}
+
+		function getExactProjectedPreviewDiameterMetrics(
+			rangeBlocks,
+			previewSubject = null,
+		) {
+			const root = document.documentElement;
+			if (!(root instanceof HTMLElement)) return null;
+
+			const expectedKind = getPreviewSubjectKind(previewSubject);
+			const expectedRange =
+				normalizePlanningRange(rangeBlocks) ?? defaultPlanningNationRange;
+			const exactKind = root.getAttribute(PLANNING_PREVIEW_EXACT_KIND_ATTR);
+			const exactRange = Number(
+				root.getAttribute(PLANNING_PREVIEW_EXACT_RANGE_BLOCKS_ATTR),
+			);
+			const exactDiameter = Number(
+				root.getAttribute(PLANNING_PREVIEW_EXACT_DIAMETER_ATTR),
+			);
+			if (
+				exactKind !== expectedKind ||
+				!Number.isFinite(exactRange) ||
+				exactRange !== expectedRange ||
+				!Number.isFinite(exactDiameter) ||
+				exactDiameter <= 0
+			) {
+				return null;
+			}
+
+			const previewDiameterPx = Math.max(
+				36,
+				Math.min(PLANNING_PREVIEW_MAX_DIAMETER_PX, Math.round(exactDiameter)),
+			);
+			return {
+				rawDiameterPx: Math.round(exactDiameter),
+				previewDiameterPx,
+				wasClamped: previewDiameterPx !== Math.round(exactDiameter),
+				mode:
+					root.getAttribute(PLANNING_PREVIEW_EXACT_MODE_ATTR) ||
+					"exact-projected",
+			};
+		}
+
+		function readPlanningRootAttribute(name) {
+			return document.documentElement?.getAttribute?.(name) ?? null;
+		}
+
+		function shouldAwaitExactProjectedPreview(rangeBlocks, previewSubject = null) {
+			const root = document.documentElement;
+			if (!(root instanceof HTMLElement)) return false;
+			if (
+				root.getAttribute(PLANNING_LIVE_READY_ATTR) !== "true" ||
+				!Number.isFinite(planningCursorPreviewLastPointer?.clientX) ||
+				!Number.isFinite(planningCursorPreviewLastPointer?.clientY)
+			) {
+				return false;
+			}
+			return (
+				getExactProjectedPreviewDiameterMetrics(rangeBlocks, previewSubject) == null
+			);
+		}
+
+		function getLiveMeasuredBlocksPerPixel(previewSubject = null) {
+			try {
+				if (
+					document.documentElement?.getAttribute?.(PLANNING_LIVE_READY_ATTR) !==
+					"true"
+				) {
+					return null;
+				}
+				const genericBlocksPerPixel = Number(
+					document.documentElement?.getAttribute?.(
+						PLANNING_LIVE_MAP_BLOCKS_PER_PIXEL_ATTR,
+					),
+				);
+				if (
+					Number.isFinite(genericBlocksPerPixel) &&
+					genericBlocksPerPixel > 0
+				) {
+					return genericBlocksPerPixel;
+				}
+				const attrName = getPreviewSubjectKind(previewSubject) === "town"
+					? PLANNING_LIVE_TOWN_BLOCKS_PER_PIXEL_ATTR
+					: PLANNING_LIVE_BLOCKS_PER_PIXEL_ATTR;
+				const blocksPerPixel = Number(
+					document.documentElement?.getAttribute?.(
+						attrName,
+					),
+				);
+				if (Number.isFinite(blocksPerPixel) && blocksPerPixel > 0) {
+					return blocksPerPixel;
+				}
+				return null;
+			} catch {
+				return null;
+			}
+		}
+
+		function getPlanningPreviewScaleInfo(previewSubject = null) {
 			const zoomInfo = getPlanningProjectionProbe();
+			const liveMeasuredBlocksPerPixel =
+				getLiveMeasuredBlocksPerPixel(previewSubject);
 			const zoomLevel = Number.isFinite(zoomInfo.zoomLevel)
 				? zoomInfo.zoomLevel
 				: null;
@@ -206,14 +399,19 @@
 			);
 			const blocksPerPixel = Math.max(
 				0.01,
-				knownBlocksPerPixel ?? fallbackBlocksPerPixel,
+				liveMeasuredBlocksPerPixel ??
+					knownBlocksPerPixel ??
+					fallbackBlocksPerPixel,
 			);
 
 			return {
 				...zoomInfo,
+				liveMeasuredBlocksPerPixel,
 				blocksPerPixel,
 				calibrationMode:
-					knownBlocksPerPixel != null
+					liveMeasuredBlocksPerPixel != null
+						? "live-render-measured"
+						: knownBlocksPerPixel != null
 						? "measured-table"
 						: zoomLevel == null
 							? "zoom-fallback"
@@ -221,20 +419,16 @@
 			};
 		}
 
-		function getPlanningPreviewMaxDiameter() {
-			return Math.max(240, 32767);
-		}
-
-		function getScaledPreviewDiameterMetrics(rangeBlocks) {
+		function getScaledPreviewDiameterMetrics(rangeBlocks, previewSubject = null) {
 			const normalizedRange =
 				normalizePlanningRange(rangeBlocks) ?? defaultPlanningNationRange;
-			const { blocksPerPixel } = getPlanningPreviewScaleInfo();
+			const { blocksPerPixel } = getPlanningPreviewScaleInfo(previewSubject);
 			const rawDiameter = Math.round(
 				(normalizedRange * 2) / Math.max(0.01, blocksPerPixel),
 			);
 			const previewDiameterPx = Math.max(
 				36,
-				Math.min(getPlanningPreviewMaxDiameter(), rawDiameter),
+				Math.min(PLANNING_PREVIEW_MAX_DIAMETER_PX, rawDiameter),
 			);
 			return {
 				rawDiameterPx: rawDiameter,
@@ -266,14 +460,15 @@
 
 		function updatePlanningCursorPreviewVisual() {
 			const preview = ensurePlanningCursorPreviewElement();
-			const previewSubject =
-				getPlanningPreviewSubject() ?? getHardcodedPlanningNation();
-			const range =
-				normalizePlanningRange(previewSubject?.rangeRadiusBlocks) ??
-				getHardcodedPlanningNation()?.rangeRadiusBlocks ??
-				getPlanningDefaultRange();
-			const scaleInfo = getPlanningPreviewScaleInfo();
-			const diameterMetrics = getScaledPreviewDiameterMetrics(range);
+			const debugInfo = getPlanningCursorPreviewDebugInfo();
+			if (debugInfo.awaitingExactProjection) {
+				preview.hidden = true;
+				return false;
+			}
+			const previewSubjectLabel = debugInfo.previewSubjectLabel;
+			const range = debugInfo.rangeRadiusBlocks;
+			const scaleInfo = debugInfo.scaleInfo;
+			const diameterMetrics = debugInfo.diameterMetrics;
 			const diameter = diameterMetrics.previewDiameterPx;
 			const rawCenterDiameter = Math.round(
 				(PLANNING_CENTER_RADIUS_BLOCKS * 2) /
@@ -298,20 +493,23 @@
 			);
 			preview.dataset.previewRawCenterDiameter = String(rawCenterDiameter);
 			preview.dataset.previewCenterDiameter = String(centerDiameter);
+			preview.dataset.previewSubjectLabel = previewSubjectLabel;
 			preview.querySelector("#planning-cursor-preview-label").textContent =
-				`${range} b`;
+				`${previewSubjectLabel} - ${range} b`;
 			logPlanningCursorPreviewScaleInfo({
+				label: previewSubjectLabel,
 				rangeRadiusBlocks: range,
 				rawPreviewDiameterPx: diameterMetrics.rawDiameterPx,
 				previewDiameterPx: diameter,
 				previewDiameterWasClamped: diameterMetrics.wasClamped,
 				rawCenterDiameterPx: rawCenterDiameter,
 				centerDiameterPx: centerDiameter,
+				exactProjectedDiameterPx: debugInfo.exactDiameterMetrics?.rawDiameterPx ?? null,
 				blocksPerPixel: planningProjection.roundDebugValue(
 					scaleInfo.blocksPerPixel,
 					6,
 				),
-				calibrationMode: scaleInfo.calibrationMode,
+				calibrationMode: debugInfo.calibrationMode,
 				zoomLevel: scaleInfo.zoomLevel,
 				zoomSource: scaleInfo.zoomSource,
 				runtimeZoom: scaleInfo.runtimeZoom,
@@ -325,11 +523,84 @@
 					scaleInfo.effectiveZoomFromTilePaneScale,
 				effectiveZoomFromTileLayerScale:
 					scaleInfo.effectiveZoomFromTileLayerScale,
+				liveMeasuredBlocksPerPixel: planningProjection.roundDebugValue(
+					scaleInfo.liveMeasuredBlocksPerPixel,
+					6,
+				),
 			});
+			return true;
+		}
+
+		function getPlanningCursorPreviewDebugInfo() {
+			const previewSubject =
+				getPlanningPreviewSubject() ?? getHardcodedPlanningNation();
+			const previewSubjectLabel =
+				typeof previewSubject?.label === "string" && previewSubject.label.trim()
+					? previewSubject.label.trim()
+					: "Range";
+			const rangeRadiusBlocks =
+				normalizePlanningRange(previewSubject?.rangeRadiusBlocks) ??
+				getHardcodedPlanningNation()?.rangeRadiusBlocks ??
+				getPlanningDefaultRange();
+			publishPlanningCursorPreviewRequest({
+				previewSubject,
+				rangeRadiusBlocks,
+				clientX: planningCursorPreviewLastPointer?.clientX ?? null,
+				clientY: planningCursorPreviewLastPointer?.clientY ?? null,
+			});
+			const scaleInfo = getPlanningPreviewScaleInfo(previewSubject);
+			const exactDiameterMetrics = getExactProjectedPreviewDiameterMetrics(
+				rangeRadiusBlocks,
+				previewSubject,
+			);
+			const awaitingExactProjection =
+				exactDiameterMetrics == null &&
+				shouldAwaitExactProjectedPreview(rangeRadiusBlocks, previewSubject);
+			const diameterMetrics = exactDiameterMetrics ?? getScaledPreviewDiameterMetrics(
+				rangeRadiusBlocks,
+				previewSubject,
+			);
+
+			return {
+				previewSubject,
+				previewSubjectLabel,
+				rangeRadiusBlocks,
+				scaleInfo,
+				exactDiameterMetrics,
+				diameterMetrics,
+				awaitingExactProjection,
+				calibrationMode:
+					exactDiameterMetrics?.mode ??
+					(awaitingExactProjection
+						? "exact-projected-pending"
+						: scaleInfo.calibrationMode),
+				liveScaleAttrs: {
+					generic: readPlanningRootAttribute(
+						PLANNING_LIVE_MAP_BLOCKS_PER_PIXEL_ATTR,
+					),
+					nation: readPlanningRootAttribute(
+						PLANNING_LIVE_BLOCKS_PER_PIXEL_ATTR,
+					),
+					town: readPlanningRootAttribute(
+						PLANNING_LIVE_TOWN_BLOCKS_PER_PIXEL_ATTR,
+					),
+				},
+				exactPreviewAttrs: {
+					kind: readPlanningRootAttribute(PLANNING_PREVIEW_EXACT_KIND_ATTR),
+					rangeBlocks: readPlanningRootAttribute(
+						PLANNING_PREVIEW_EXACT_RANGE_BLOCKS_ATTR,
+					),
+					diameterPx: readPlanningRootAttribute(
+						PLANNING_PREVIEW_EXACT_DIAMETER_ATTR,
+					),
+					mode: readPlanningRootAttribute(PLANNING_PREVIEW_EXACT_MODE_ATTR),
+				},
+			};
 		}
 
 		function hidePlanningCursorPreview() {
 			const preview = getPlanningCursorPreview();
+			clearPlanningCursorPreviewRequest();
 			if (!(preview instanceof HTMLElement)) return;
 			preview.hidden = true;
 		}
@@ -394,6 +665,13 @@
 			const preview = getPlanningCursorPreview();
 			if (preview instanceof HTMLElement && !preview.hidden) {
 				updatePlanningCursorPreviewVisual();
+			} else if (preview instanceof HTMLElement && planningCursorPreviewLastPointer) {
+				const didRender = updatePlanningCursorPreviewVisual();
+				if (didRender) {
+					preview.hidden = false;
+					preview.style.left = `${planningCursorPreviewLastPointer.clientX}px`;
+					preview.style.top = `${planningCursorPreviewLastPointer.clientY}px`;
+				}
 			}
 
 			planningCursorPreviewRefreshFrame = requestAnimationFrame(
@@ -419,6 +697,8 @@
 			if (!isArmed) {
 				stopPlanningCursorPreviewRefreshLoop();
 				planningCursorPreviewLastLogSignature = null;
+				planningCursorPreviewLastPointer = null;
+				clearPlanningCursorPreviewRequest();
 				preview.hidden = true;
 				return;
 			}
@@ -441,10 +721,14 @@
 			}
 
 			const preview = ensurePlanningCursorPreviewElement();
-			updatePlanningCursorPreviewVisual();
-			preview.hidden = false;
+			planningCursorPreviewLastPointer = {
+				clientX: event.clientX,
+				clientY: event.clientY,
+			};
 			preview.style.left = `${event.clientX}px`;
 			preview.style.top = `${event.clientY}px`;
+			const didRender = updatePlanningCursorPreviewVisual();
+			preview.hidden = !didRender;
 			ensurePlanningCursorPreviewRefreshLoop();
 		}
 
@@ -476,6 +760,7 @@
 			normalizePlanningRange,
 			getPlanningPreviewScaleInfo,
 			getScaledPreviewDiameterMetrics,
+			getPlanningCursorPreviewDebugInfo,
 			ensurePlanningCursorPreview,
 			updatePlanningCursorPreviewState,
 			updatePlanningCursorPreviewVisual,
