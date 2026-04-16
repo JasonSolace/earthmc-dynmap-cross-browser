@@ -40,7 +40,7 @@
 			aurora: Object.freeze({
 				apiSegment: 'aurora',
 				hosts: Object.freeze([
-					'map.earthmc.net',
+					'aurora.earthmc.net',
 				]),
 				borderResources: Object.freeze({
 					country: 'resources/borders.aurora.json',
@@ -62,7 +62,7 @@
 			nostra: Object.freeze({
 				apiSegment: 'nostra',
 				hosts: Object.freeze([
-					'nostra.earthmc.net',
+					'map.earthmc.net',
 				]),
 				borderResources: Object.freeze({
 					country: 'resources/borders.nostra.countries.json',

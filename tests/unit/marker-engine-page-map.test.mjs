@@ -26,7 +26,7 @@ test("page-map helper underzooms tile layers by pinning native min zoom at zero"
 			minZoom: 0,
 		},
 		getTileUrl() {
-			return "https://nostra.earthmc.net/tiles/minecraft_overworld/0/0_0.png";
+			return "https://map.earthmc.net/tiles/minecraft_overworld/0/0_0.png";
 		},
 		redraw() {
 			redrawCalls += 1;

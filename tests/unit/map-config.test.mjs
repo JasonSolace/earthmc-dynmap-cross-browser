@@ -11,10 +11,10 @@ test("map-config detects map type and defaults unknown hosts to aurora", () => {
 	});
 	const mapConfig = context.EMCDYNMAPPLUS_MAP;
 
-	assert.equal(mapConfig.detectMapTypeFromHostname("map.earthmc.net"), "aurora");
+	assert.equal(mapConfig.detectMapTypeFromHostname("map.earthmc.net"), "nostra");
 	assert.equal(
-		mapConfig.detectMapTypeFromHostname("nostra.earthmc.net"),
-		"nostra",
+		mapConfig.detectMapTypeFromHostname("aurora.earthmc.net"),
+		"aurora",
 	);
 	assert.equal(mapConfig.detectMapTypeFromHostname("example.com"), null);
 	assert.equal(mapConfig.getCurrentMapType("example.com"), "aurora");
@@ -22,7 +22,7 @@ test("map-config detects map type and defaults unknown hosts to aurora", () => {
 
 test("map-config builds map API URLs with normalized slashes", () => {
 	const { context } = loadIifeScript("resources/map-config.js", [], {
-		locationHref: "https://nostra.earthmc.net/",
+		locationHref: "https://map.earthmc.net/",
 	});
 	const mapConfig = context.EMCDYNMAPPLUS_MAP;
 
@@ -38,7 +38,7 @@ test("map-config builds map API URLs with normalized slashes", () => {
 
 test("map-config exposes active border and chunk settings per map", () => {
 	const { context } = loadIifeScript("resources/map-config.js", [], {
-		locationHref: "https://nostra.earthmc.net/",
+		locationHref: "https://map.earthmc.net/",
 	});
 	const mapConfig = context.EMCDYNMAPPLUS_MAP;
 

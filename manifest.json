@@ -17,7 +17,7 @@
 	},
 	"web_accessible_resources": [
 		{
-			"matches": ["https://map.earthmc.net/*", "https://nostra.earthmc.net/*"],
+			"matches": ["https://map.earthmc.net/*", "https://aurora.earthmc.net/*"],
 			"resources": [
 				"resources/icon-screenshot.png",
 				"resources/icon-show.png",
@@ -46,7 +46,7 @@
 	],
 	"content_scripts": [
 		{
-			"matches": ["https://map.earthmc.net/*", "https://nostra.earthmc.net/*"],
+			"matches": ["https://map.earthmc.net/*", "https://aurora.earthmc.net/*"],
 			"run_at": "document_start",
 			"css": ["resources/style.css"],
 			"js": [

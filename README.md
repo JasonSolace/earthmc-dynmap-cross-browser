@@ -323,7 +323,7 @@ Use `.env.e2e.local` for machine-specific test targets or browser paths that sho
 
 ### What the `archive` e2e test checks
 
-The current automated test opens `https://map.earthmc.net/`, switches the extension into archive mode, refreshes the page, and checks that:
+The current automated test opens `https://map.earthmc.net/` for the live Nostra map, switches the extension into archive mode, refreshes the page, and checks that:
 
 - the archive label appears
 - the archive label stays stable
@@ -419,7 +419,7 @@ If you want to change the border dataset, update the source GeoJSON files in `so
 
 This project talks to a few services outside the current page origin. That is normal for the current feature set, but it is worth knowing up front:
 
-- `map.earthmc.net` and `earthmc.net`: live map tiles, markers, and older marker endpoints. Required for normal live map usage.
+- `map.earthmc.net`, `aurora.earthmc.net`, and `earthmc.net`: live map tiles, markers, and older marker endpoints. Required for normal live map usage.
 - `api.earthmc.net`: official EarthMC API lookups used by live extension features such as player and server data. Required for those live lookup features.
 - `web.archive.org`: historical marker snapshots for archive mode. Archive-only dependency.
 - `api.codetabs.com`: relay used for archive-mode Wayback requests in practice because direct browser/runtime Wayback fetches are not currently reliable enough. Archive-only third-party dependency.
