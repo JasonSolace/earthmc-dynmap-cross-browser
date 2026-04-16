@@ -27,12 +27,16 @@ If you already have a built release artifact or a local build, load it like this
 
 ### Chromium
 
+Normal users should install the official Chrome release from CWS:
+
+- https://chromewebstore.google.com/detail/earthmc-dynmap+-cross-bro/jmbcckhijagbdajjnefldnhlidhogjio
+
+For a local build from this repository:
+
 1. Open `chrome://extensions`.
 2. Enable `Developer mode`.
 3. Click `Load unpacked`.
-4. Select the extension folder.
-
-For a local build from this repository, that folder is `dist/chromium/`.
+4. Select the extension folder: `dist/chromium/`.
 
 ### Firefox
 
@@ -44,29 +48,7 @@ For a local build from this repository:
 
 1. Open `about:debugging#/runtime/this-firefox`.
 2. Click `Load Temporary Add-on...`.
-3. Select the extension manifest.
-
-That file is `dist/firefox/manifest.json`.
-
-### Common issues
-
-### Firefox add-on disappears after restart
-
-Firefox temporary add-ons are removed when Firefox fully restarts. That is normal during local development and manual testing.
-
-### I see thin line artifacts at maximum zoom
-
-On some Chromium and Firefox setups, disabling browser hardware acceleration can cause visible seam or line artifacts when the map is zoomed all the way in.
-
-The extension can still run without hardware acceleration, but maximum-zoom rendering is most reliable with hardware acceleration enabled in the browser.
-
-### Archive mode is unavailable or inconsistent
-
-Archive mode depends on historical marker snapshots and a compatibility relay. Normal live map browsing does not depend on that path.
-
-Archive mode currently fetches Wayback snapshots through `https://api.codetabs.com/v1/proxy/?quest=` in practice.
-
-This relay is only used for archive mode. If archive mode is unavailable, the rest of the extension can still work normally.
+3. Select the extension manifest: `dist/firefox/manifest.json`.
 
 ## License and Attribution
 
@@ -86,6 +68,16 @@ This fork extends the project with:
 - automated testing
 - new features and UI improvements
 - bug fixes and reliability work
+
+### Common issues
+
+### Archive mode is unavailable or inconsistent
+
+Archive mode depends on historical marker snapshots and a compatibility relay. Normal live map browsing does not depend on that path.
+
+Archive mode currently fetches Wayback snapshots through `https://api.codetabs.com/v1/proxy/?quest=` in practice.
+
+This relay is only used for archive mode. If archive mode is unavailable, the rest of the extension can still work normally.
 
 ## For Developers
 
