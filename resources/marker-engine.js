@@ -54,7 +54,7 @@ const getCurrentBorderResourcePaths = () =>
 	};
 const getCurrentMapType = () => EARTHMC_MAP?.getCurrentMapType?.() ?? "aurora";
 const getCurrentOapiUrl = (resourcePath = "") =>
-	EARTHMC_MAP?.getMapApiUrl?.(OAPI_BASE, resourcePath)
+	EARTHMC_MAP?.getMapOfficialApiUrl?.(OAPI_BASE, resourcePath)
 		?? `${OAPI_BASE}/aurora${resourcePath ? `/${String(resourcePath).replace(/^\/+/, "")}` : ""}`;
 const getCurrentCapiUrl = (resourcePath = "") =>
 	EARTHMC_MAP?.getMapApiUrl?.(CAPI_BASE, resourcePath)

@@ -18,7 +18,7 @@ const OAPI_REQ_PER_MIN = 180
 const OAPI_ITEMS_PER_REQ = 100
 
 const getCurrentOapiUrl = (resourcePath = '') =>
-	globalThis.EMCDYNMAPPLUS_MAP?.getMapApiUrl?.(OAPI_BASE, resourcePath)
+	globalThis.EMCDYNMAPPLUS_MAP?.getMapOfficialApiUrl?.(OAPI_BASE, resourcePath)
 		?? `${OAPI_BASE}/aurora${resourcePath ? `/${String(resourcePath).replace(/^\/+/, '')}` : ''}`
 
 const getCurrentCapiUrl = (resourcePath = '') =>

@@ -3,6 +3,7 @@
 
 	const normalizeBaseUrl = (baseUrl) => String(baseUrl).replace(/\/+$/, '')
 	const normalizeResourcePath = (resourcePath) => String(resourcePath ?? '').replace(/^\/+/, '')
+	const normalizePathSegment = (pathSegment) => String(pathSegment ?? '').replace(/^\/+|\/+$/g, '')
 
 	// Preserve current overclaim behavior by keeping the existing Aurora-era bonus tiers
 	// in one place. If Aurora support is dropped later, this table is the safe place to
@@ -39,6 +40,7 @@
 		maps: Object.freeze({
 			aurora: Object.freeze({
 				apiSegment: 'aurora',
+				officialApiSegment: 'aurora',
 				hosts: Object.freeze([
 					'aurora.earthmc.net',
 				]),
@@ -61,6 +63,7 @@
 			}),
 			nostra: Object.freeze({
 				apiSegment: 'nostra',
+				officialApiSegment: '',
 				hosts: Object.freeze([
 					'map.earthmc.net',
 				]),
@@ -118,14 +121,21 @@
 	const shouldInjectDynmapPlusChunksLayer = (mapType = getCurrentMapType()) =>
 		getMapConfig(mapType).injectDynmapPlusChunksLayer !== false
 
-	const getMapApiUrl = (baseUrl, resourcePath = '', mapType = getCurrentMapType()) => {
-		const mapConfig = getMapConfig(mapType)
-		const parts = [normalizeBaseUrl(baseUrl), mapConfig.apiSegment]
+	const buildMapUrl = (baseUrl, resourcePath = '', pathSegment = '') => {
+		const parts = [normalizeBaseUrl(baseUrl)]
+		const normalizedPathSegment = normalizePathSegment(pathSegment)
+		if (normalizedPathSegment) parts.push(normalizedPathSegment)
 		const normalizedResourcePath = normalizeResourcePath(resourcePath)
 		if (normalizedResourcePath) parts.push(normalizedResourcePath)
 
 		return parts.join('/')
 	}
+
+	const getMapApiUrl = (baseUrl, resourcePath = '', mapType = getCurrentMapType()) =>
+		buildMapUrl(baseUrl, resourcePath, getMapConfig(mapType).apiSegment)
+
+	const getMapOfficialApiUrl = (baseUrl, resourcePath = '', mapType = getCurrentMapType()) =>
+		buildMapUrl(baseUrl, resourcePath, getMapConfig(mapType).officialApiSegment)
 
 	const getNationClaimBonus = (numNationResidents, mapType = getCurrentMapType()) => {
 		const tiers = getMapConfig(mapType).nationBonusTiers || []
@@ -155,6 +165,7 @@
 		getPlanningLeafletProjection,
 		shouldInjectDynmapPlusChunksLayer,
 		getMapApiUrl,
+		getMapOfficialApiUrl,
 		getNationClaimBonus,
 		getArchiveMarkersSourceUrl,
 	})

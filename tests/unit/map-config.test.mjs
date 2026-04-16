@@ -27,12 +27,20 @@ test("map-config builds map API URLs with normalized slashes", () => {
 	const mapConfig = context.EMCDYNMAPPLUS_MAP;
 
 	assert.equal(
-		mapConfig.getMapApiUrl("https://api.earthmc.net/v4/", "/towns", "nostra"),
-		"https://api.earthmc.net/v4/nostra/towns",
+		mapConfig.getMapOfficialApiUrl("https://api.earthmc.net/v4/", "/towns", "nostra"),
+		"https://api.earthmc.net/v4/towns",
+	);
+	assert.equal(
+		mapConfig.getMapOfficialApiUrl("https://api.earthmc.net/v4/", "/towns", "aurora"),
+		"https://api.earthmc.net/v4/aurora/towns",
 	);
 	assert.equal(
 		mapConfig.getMapApiUrl("https://emcstats.bot.nu", "", "aurora"),
 		"https://emcstats.bot.nu/aurora",
+	);
+	assert.equal(
+		mapConfig.getMapApiUrl("https://emcstats.bot.nu", "alliances", "nostra"),
+		"https://emcstats.bot.nu/nostra/alliances",
 	);
 });
 
