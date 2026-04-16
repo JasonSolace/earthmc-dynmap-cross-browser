@@ -12,7 +12,7 @@ const EMC_DOMAIN = "earthmc.net"
 
 const CAPI_BASE = `https://emcstats.bot.nu`
 const MAPI_BASE = `https://map.${EMC_DOMAIN}`
-const OAPI_BASE = `https://api.${EMC_DOMAIN}/v3` // bump number here after migrating to a new OAPI ver
+const OAPI_BASE = `https://api.${EMC_DOMAIN}/v4`
 
 const OAPI_REQ_PER_MIN = 180
 const OAPI_ITEMS_PER_REQ = 100

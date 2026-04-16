@@ -27,8 +27,8 @@ test("map-config builds map API URLs with normalized slashes", () => {
 	const mapConfig = context.EMCDYNMAPPLUS_MAP;
 
 	assert.equal(
-		mapConfig.getMapApiUrl("https://api.earthmc.net/v3/", "/towns", "nostra"),
-		"https://api.earthmc.net/v3/nostra/towns",
+		mapConfig.getMapApiUrl("https://api.earthmc.net/v4/", "/towns", "nostra"),
+		"https://api.earthmc.net/v4/nostra/towns",
 	);
 	assert.equal(
 		mapConfig.getMapApiUrl("https://emcstats.bot.nu", "", "aurora"),

@@ -74,7 +74,7 @@ test("httputil batches concurrent UUID lookups and flattens responses", async ()
 		uuid: `uuid-${index}`,
 	}));
 	const result = await exports.queryConcurrent(
-		"https://api.earthmc.net/v3/aurora/nations",
+		"https://api.earthmc.net/v4/aurora/nations",
 		input,
 	);
 

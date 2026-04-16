@@ -36,7 +36,7 @@ const PROXY_URL = "https://api.codetabs.com/v1/proxy/?quest=";
 const EARTHMC_MAP = globalThis.EMCDYNMAPPLUS_MAP ?? null;
 const EMC_DOMAIN = "earthmc.net";
 const CAPI_BASE = "https://emcstats.bot.nu";
-const OAPI_BASE = `https://api.${EMC_DOMAIN}/v3`;
+const OAPI_BASE = `https://api.${EMC_DOMAIN}/v4`;
 const OAPI_REQ_PER_MIN = 180;
 const OAPI_ITEMS_PER_REQ = 100;
 
@@ -68,6 +68,23 @@ const getArchiveMarkersSourceUrl = (date) =>
 		);
 const getNationClaimBonus = (numNationResidents) =>
 	EARTHMC_MAP?.getNationClaimBonus?.(numNationResidents, getCurrentMapType()) ?? 0;
+
+function isClaimMarker(marker) {
+	return marker?.type === "polygon" || marker?.type === "icon";
+}
+
+function isClaimLayer(layer) {
+	if (!layer || !Array.isArray(layer.markers)) return false;
+	if (layer.id === "towny") return true;
+	if (/territory/i.test(String(layer.name || ""))) return true;
+
+	return layer.markers.some(isClaimMarker);
+}
+
+function getClaimLayer(layers) {
+	if (!Array.isArray(layers)) return null;
+	return layers.find(isClaimLayer) ?? null;
+}
 
 function getUserscriptBorders(resourcePath) {
 	const filename = String(resourcePath || "").split("/").pop() || "";
@@ -483,22 +500,18 @@ function addBorderLayer(data, definition, borders, failureLabel) {
 async function modifyMarkersInPage(data) {
 	let result = stripDynmapPlusManagedLayers(data);
 	const mapMode = currentMapMode();
+	let claimLayer = getClaimLayer(result);
 
 	pageMarkersDebugInfo(`${MARKER_ENGINE_PREFIX}: modifyMarkers started`, {
 		mapMode,
 		layerCount: Array.isArray(result) ? result.length : null,
-		initialMarkerCount: Array.isArray(result?.[0]?.markers) ? result[0].markers.length : null,
+		initialMarkerCount: Array.isArray(claimLayer?.markers) ? claimLayer.markers.length : null,
+		initialClaimLayerId: claimLayer?.id ?? null,
 	});
 
 	if (mapMode === "archive") {
 		result = await getArchive(result);
-	}
-
-	if (!result?.[0]?.markers?.length) {
-		parsedMarkers = [];
-		syncParsedMarkers();
-		showPageAlert("Unexpected error occurred while loading the map, EarthMC may be down. Try again later.");
-		return result;
+		claimLayer = getClaimLayer(result);
 	}
 
 	const isAllianceMode = mapMode === "alliances" || mapMode === "meganations";
@@ -547,6 +560,20 @@ async function modifyMarkersInPage(data) {
 		result = addPlanningLayer(result);
 	}
 
+	claimLayer = getClaimLayer(result);
+	if (!claimLayer?.markers?.length) {
+		parsedMarkers = [];
+		syncParsedMarkers();
+		console.warn(`${MARKER_ENGINE_PREFIX}: map payload did not include a usable territory layer`, {
+			mapMode,
+			mapType: getCurrentMapType(),
+			layerIds: Array.isArray(result)
+				? result.map((layer) => layer?.id ?? null)
+				: null,
+		});
+		return result;
+	}
+
 	const date = archiveDate();
 	const isSquaremap = mapMode !== "archive" || date >= 20240701;
 	const claimsCustomizerInfo = new Map(
@@ -557,7 +584,7 @@ async function modifyMarkersInPage(data) {
 	const useOpaque = localStorage["emcdynmapplus-nation-claims-opaque-colors"] === "true";
 	const showExcluded = localStorage["emcdynmapplus-nation-claims-show-excluded"] === "true";
 
-	for (const marker of result[0].markers) {
+	for (const marker of claimLayer.markers) {
 		if (marker.type !== "polygon" && marker.type !== "icon") continue;
 		const hasParsableMarkerDescription = isSquaremap
 			? typeof marker.tooltip === "string" && typeof marker.popup === "string"
@@ -600,7 +627,8 @@ async function modifyMarkersInPage(data) {
 	pageMarkersDebugInfo(`${MARKER_ENGINE_PREFIX}: modifyMarkers completed`, {
 		mapMode,
 		parsedMarkersCount: parsedMarkers.length,
-		markerCount: Array.isArray(result?.[0]?.markers) ? result[0].markers.length : null,
+		markerCount: Array.isArray(claimLayer?.markers) ? claimLayer.markers.length : null,
+		claimLayerId: claimLayer?.id ?? null,
 	});
 
 	return result;
