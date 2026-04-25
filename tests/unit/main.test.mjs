@@ -46,14 +46,35 @@ function createDomHelpers(document) {
 function loadMain({
 	now = Date.UTC(2026, 2, 31),
 	playerResponse = [],
+	fetchJSON = async () => ({}),
 	showAlert = () => {},
 } = {}) {
-	const env = loadPlainScript("src/main.js", ["lookupPlayer", "timeAgo"], {
+	const env = loadPlainScript("src/main.js", [
+		"lookupPlayer",
+		"timeAgo",
+		"getEventElement",
+		"getNameplatePlayerName",
+		"getSquaremapPlayerListLink",
+		"resolveSquaremapPlayerName",
+	], {
 		now,
+		fetchImpl: async (url, options = {}) => ({
+			ok: true,
+			status: 200,
+			url: String(url),
+			clone() {
+				return this;
+			},
+			async json() {
+				if (String(url).includes("example.test/players")) return playerResponse;
+				return {};
+			},
+		}),
 		extraGlobals: {
 			waitForElement() {
 				return new Promise(() => {});
 			},
+			fetchJSON,
 			postJSON: async () => playerResponse,
 			getCurrentOapiUrl(resource) {
 				return `https://example.test/${resource}`;
@@ -120,9 +141,15 @@ test("main renders player lookup safely for townless and offline players", async
 	await env.exports.lookupPlayer("SoloPlayer");
 
 	assert.deepEqual(alerts, []);
-	assert.equal(leafletTopLeft.children.length, 1);
+	assert.equal(leafletTopLeft.children.length, 0);
 
-	const lookup = leafletTopLeft.children[0];
+	const lookupHost = env.document.body.children.find(
+		(child) => child.id === "emcdynmapplus-player-lookup-host",
+	);
+	assert.ok(lookupHost);
+	assert.equal(lookupHost.children.length, 1);
+
+	const lookup = lookupHost.children[0];
 	assert.equal(lookup.id, "player-lookup");
 	assert.equal(
 		lookup.children[1].children[1].children[0].textContent,
@@ -144,4 +171,57 @@ test("main renders player lookup safely for townless and offline players", async
 	assert.equal(meta.children[0].children[0].textContent, "Registered");
 	assert.equal(meta.children[1].children[0].textContent, "Last online");
 	assert.equal(meta.children[1].children[2].textContent, "1 day ago");
+});
+
+test("main resolves Squaremap player-list clicks to the underlying player name", async () => {
+	const fetchUrls = [];
+	const env = loadMain({
+		fetchJSON: async (url) => {
+			fetchUrls.push(url);
+			return {
+				players: [
+					{
+						uuid: "da756925413f495490639e19d1be9017",
+						name: "Deflects",
+					},
+				],
+			};
+		},
+	});
+
+	const link = env.document.createElement("a");
+	link.id = "da756925413f495490639e19d1be9017";
+	const span = env.document.createElement("span");
+	span.textContent = "DecoratedDisplayName";
+	link.__queryMap.set("span", span);
+
+	const target = env.document.createElement("span");
+	target.__closestMap.set("#players a[id]", link);
+
+	assert.equal(env.exports.getSquaremapPlayerListLink(target), link);
+	assert.equal(await env.exports.resolveSquaremapPlayerName(link), "Deflects");
+	assert.deepEqual(fetchUrls, [
+		"https://map.earthmc.net/tiles/players.json",
+	]);
+});
+
+test("main extracts player names from Squaremap nameplate tooltips", () => {
+	const env = loadMain();
+	const tooltip = env.document.createElement("div");
+	tooltip.textContent = "Deflects";
+
+	const target = env.document.createElement("img");
+	target.__closestMap.set(".leaflet-nameplate-pane .leaflet-tooltip", tooltip);
+
+	assert.equal(env.exports.getNameplatePlayerName(target), "Deflects");
+});
+
+test("main normalizes text-node event targets to their parent element", () => {
+	const env = loadMain();
+	const parent = env.document.createElement("span");
+	const textNode = {
+		parentElement: parent,
+	};
+
+	assert.equal(env.exports.getEventElement(textNode), parent);
 });

@@ -2,32 +2,186 @@
 
 bindNameplatePlayerLookup();
 bindPopupResidentLookup();
+bindSquaremapPlayerListLookup();
 
 /** @type {Array<ParsedMarker>} */
 let parsedMarkers = [];
+const squaremapPlayerNameByUuid = new Map();
+let lastNameplateLookupKey = "";
+let lastNameplateLookupAt = 0;
+const PLAYER_LOOKUP_TIMEOUT_MS = 10000;
+
+function getEventElement(target) {
+	if (target && typeof target.closest === "function") return target;
+	return target?.parentElement && typeof target.parentElement.closest === "function"
+		? target.parentElement
+		: null;
+}
 
 function bindNameplatePlayerLookup() {
-	waitForElement(".leaflet-nameplate-pane").then((element) => {
-		element.addEventListener("click", (event) => {
-			const target = event.target;
-			const username =
-				target?.textContent?.trim() ||
-				target?.parentElement?.parentElement?.textContent?.trim() ||
-				"";
-			if (!username) return;
+	document.addEventListener("click", handleNameplatePlayerLookupEvent, true);
+	document.addEventListener("pointerup", handleNameplatePlayerLookupEvent, true);
 
-			lookupPlayer(username, false);
-		});
+	waitForElement(".leaflet-nameplate-pane").then((element) => {
+		if (element) element.style.pointerEvents = "auto";
 	});
+}
+
+function handleNameplatePlayerLookupEvent(event) {
+	const target = getEventElement(event.target);
+	if (!target) return;
+
+	const username = getNameplatePlayerName(target);
+	if (!username) return;
+
+	const now = Date.now();
+	const lookupKey = `${event.type}:${username}`;
+	const previousLookupSamePlayer = lastNameplateLookupKey.endsWith(`:${username}`);
+	if (previousLookupSamePlayer && now - lastNameplateLookupAt < 350) return;
+
+	lastNameplateLookupKey = lookupKey;
+	lastNameplateLookupAt = now;
+	lookupPlayer(username, false);
+}
+
+/**
+ * @param {Element} target
+ */
+function getNameplatePlayerName(target) {
+	const tooltip = target.closest(".leaflet-nameplate-pane .leaflet-tooltip");
+	if (tooltip) return sanitizeVisiblePlayerName(tooltip.textContent);
+
+	if (!target.closest(".leaflet-nameplate-pane")) return "";
+
+	return sanitizeVisiblePlayerName(
+		target.textContent ||
+			target.parentElement?.parentElement?.textContent ||
+			"",
+	);
+}
+
+function bindSquaremapPlayerListLookup() {
+	document.addEventListener(
+		"click",
+		(event) => {
+			const target = getEventElement(event.target);
+			if (!target) return;
+
+			const link = getSquaremapPlayerListLink(target);
+			if (!link) return;
+
+			resolveSquaremapPlayerName(link).then((playerName) => {
+				if (!playerName) return;
+
+				lookupPlayer(playerName);
+			});
+		},
+		true,
+	);
+}
+
+/**
+ * @param {Element} target
+ * @returns {HTMLAnchorElement | null}
+ */
+function getSquaremapPlayerListLink(target) {
+	const link = target.closest("#players a[id]");
+	return link?.tagName === "A" ? link : null;
+}
+
+/**
+ * @param {string} value
+ */
+function normalizeSquaremapUuid(value) {
+	return String(value || "").replaceAll("-", "").toLowerCase();
+}
+
+/**
+ * @param {string} text
+ */
+function sanitizeVisiblePlayerName(text) {
+	return String(text || "").trim();
+}
+
+/**
+ * @param {HTMLAnchorElement} link
+ */
+async function resolveSquaremapPlayerName(link) {
+	const uuid = normalizeSquaremapUuid(link.id);
+	if (uuid && squaremapPlayerNameByUuid.has(uuid)) {
+		return squaremapPlayerNameByUuid.get(uuid);
+	}
+
+	if (uuid) {
+		const playersJsonUrl = new URL("tiles/players.json", location.href).toString();
+		try {
+			const playersJson = await fetchJSON(playersJsonUrl, { cache: "no-store" });
+			const players = Array.isArray(playersJson?.players) ? playersJson.players : [];
+			for (const player of players) {
+				const playerUuid = normalizeSquaremapUuid(player?.uuid);
+				const playerName = sanitizeVisiblePlayerName(player?.name);
+				if (!playerUuid || !playerName) continue;
+
+				squaremapPlayerNameByUuid.set(playerUuid, playerName);
+			}
+		} catch (err) {
+			console.warn("emcdynmapplus: failed to resolve Squaremap player name", err);
+		}
+
+		if (squaremapPlayerNameByUuid.has(uuid)) {
+			return squaremapPlayerNameByUuid.get(uuid);
+		}
+	}
+
+	return sanitizeVisiblePlayerName(
+		link.querySelector("span")?.textContent || link.textContent,
+	);
+}
+
+function createTimeoutSignal(timeoutMs) {
+	if (typeof AbortController !== "function") return {};
+
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+	return {
+		signal: controller.signal,
+		cancel() {
+			clearTimeout(timeoutId);
+		},
+	};
+}
+
+async function lookupPlayersByName(playerName) {
+	const url = getCurrentOapiUrl("players");
+	const timeout = createTimeoutSignal(PLAYER_LOOKUP_TIMEOUT_MS);
+
+	try {
+		const response = await fetch(url, {
+			body: JSON.stringify({ query: [playerName] }),
+			method: "POST",
+			...(timeout.signal ? { signal: timeout.signal } : {}),
+		});
+		if (!response.ok && response.status !== 304) return null;
+
+		return await response.json();
+	} catch (err) {
+		console.warn("emcdynmapplus: player lookup request failed", {
+			url,
+			playerName,
+			err,
+		});
+		return null;
+	} finally {
+		timeout.cancel?.();
+	}
 }
 
 function bindPopupResidentLookup() {
 	waitForElement(".leaflet-popup-pane").then((element) => {
 		element.addEventListener("click", (event) => {
+			const eventTarget = getEventElement(event.target);
 			const target =
-				event.target instanceof Element
-					? event.target.closest(".resident-clickable")
-					: null;
+				eventTarget?.closest(".resident-clickable") ?? null;
 			const playerName = target?.textContent?.trim() ?? "";
 			if (!playerName) return;
 
@@ -51,14 +205,10 @@ async function lookupPlayer(playerName, showOnlineStatus = true) {
 	document.querySelector("#player-lookup")?.remove();
 	document.querySelector("#player-lookup-loading")?.remove();
 
-	const leafletTopLeft = document.querySelector(".leaflet-top.leaflet-left");
-	if (!leafletTopLeft) {
-		showAlert("Error selecting element required to show player info popup.");
-		return;
-	}
+	const lookupHost = getPlayerLookupHost();
 
 	const loading = addElement(
-		leafletTopLeft,
+		lookupHost,
 		createElement("div", {
 			id: "player-lookup-loading",
 			className: "leaflet-control-layers leaflet-control",
@@ -66,12 +216,12 @@ async function lookupPlayer(playerName, showOnlineStatus = true) {
 		}),
 	);
 
-	const players = await postJSON(getCurrentOapiUrl("players"), {
-		query: [playerName],
-	});
+	const players = await lookupPlayersByName(playerName);
 	loading.remove();
 
-	if (!players) return showAlert("Service is currently unavailable, please try later.", 5);
+	if (!players) {
+		return showAlert("Service is currently unavailable, please try later.", 5);
+	}
 	if (players.length < 1) {
 		return showAlert(
 			`Error looking up player: ${playerName}. They have possibly opted-out.`,
@@ -105,7 +255,7 @@ async function lookupPlayer(playerName, showOnlineStatus = true) {
 		? player.uuid.replaceAll("-", "")
 		: encodeURIComponent(player.name || playerName);
 	const lookup = addElement(
-		leafletTopLeft,
+		lookupHost,
 		createElement("div", {
 			id: "player-lookup",
 			className: "leaflet-control-layers leaflet-control",
@@ -226,6 +376,18 @@ async function lookupPlayer(playerName, showOnlineStatus = true) {
 	closeButton.addEventListener("click", (event) => {
 		event.target.parentElement.remove();
 	});
+}
+
+function getPlayerLookupHost() {
+	const existing = document.querySelector("#emcdynmapplus-player-lookup-host");
+	if (existing) return existing;
+
+	return addElement(
+		document.body,
+		createElement("div", {
+			id: "emcdynmapplus-player-lookup-host",
+		}),
+	);
 }
 
 const DAY_MS = 86400000;
