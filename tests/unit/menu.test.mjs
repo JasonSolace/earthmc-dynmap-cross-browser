@@ -586,6 +586,31 @@ test("menu options dark-mode toggle reflects effective system-dark startup state
 	assert.equal(darkModeToggle.checked, true);
 });
 
+test("menu server-info toggle syncs panel and settings checkbox", () => {
+	const { context, document, localStorage } = loadMenu({
+		localStorageSeed: {
+			"emcdynmapplus-serverinfo": "true",
+		},
+	});
+	const panel = document.createElement("div");
+	panel.id = "server-info";
+	const checkbox = document.createElement("input");
+	checkbox.id = "toggle-serverinfo";
+	checkbox.checked = true;
+	const originalQuerySelector = document.querySelector;
+	document.querySelector = (selector) => {
+		if (selector === "#server-info") return panel;
+		if (selector === "#toggle-serverinfo") return checkbox;
+		return originalQuerySelector.call(document, selector);
+	};
+
+	context.toggleServerInfo(false);
+
+	assert.equal(localStorage["emcdynmapplus-serverinfo"], "false");
+	assert.equal(panel.hidden, true);
+	assert.equal(checkbox.checked, false);
+});
+
 test("menu options section rehomes Dynmap+ leaflet labels and preserves regular labels", () => {
 	const { exports, document } = loadMenu({
 		extraGlobals: {

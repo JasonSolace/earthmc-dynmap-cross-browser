@@ -437,13 +437,18 @@
 		}
 
 		function toggleServerInfo(boxTicked) {
-			localStorage["emcdynmapplus-serverinfo"] = boxTicked;
+			const enabled = Boolean(boxTicked);
+			localStorage["emcdynmapplus-serverinfo"] = enabled;
+			const serverInfoCheckbox = document.querySelector("#toggle-serverinfo");
+			if (serverInfoCheckbox && "checked" in serverInfoCheckbox) {
+				serverInfoCheckbox.checked = enabled;
+			}
 			const serverInfoPanel = document.querySelector("#server-info");
 			if (serverInfoPanel instanceof HTMLElement) {
-				serverInfoPanel.hidden = !boxTicked;
+				serverInfoPanel.hidden = !enabled;
 			}
 
-			if (!boxTicked) {
+			if (!enabled) {
 				if (globalThis.serverInfoScheduler != null) {
 					clearTimeout(globalThis.serverInfoScheduler);
 				}

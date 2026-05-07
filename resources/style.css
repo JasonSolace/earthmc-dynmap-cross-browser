@@ -1024,6 +1024,35 @@ select {
 	font-size: 21px;
 }
 
+#server-info-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+#server-info-close {
+	appearance: none;
+	border: 1px solid var(--input-border);
+	border-radius: 999px;
+	background: var(--surface-elevated);
+	color: var(--text-muted);
+	min-width: 30px;
+	min-height: 30px;
+	padding: 0 9px;
+	font: inherit;
+	font-size: 12px;
+	font-weight: 800;
+	line-height: 1;
+	cursor: pointer;
+}
+
+#server-info-close:hover,
+#server-info-close:focus-visible {
+	color: var(--accent-strong);
+	outline: none;
+}
+
 .server-info-entry {
 	display: flex;
 	align-items: center;

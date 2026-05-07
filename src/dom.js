@@ -672,7 +672,28 @@ function addServerInfoPanel(parent) {
 		id: 'server-info',
 		className: 'leaflet-control-layers leaflet-control',
 	}))
-	addElement(panel, createElement('div', { id: 'server-info-title', text: 'Server Info' }))
+	const header = addElement(panel, createElement('div', { id: 'server-info-header' }))
+	addElement(header, createElement('div', { id: 'server-info-title', text: 'Server Info' }))
+	const closeButton = addElement(header, createElement('button', {
+		id: 'server-info-close',
+		text: 'X',
+		type: 'button',
+		attrs: {
+			'aria-label': 'Close server info',
+			title: 'Close server info',
+		},
+	}))
+	closeButton.addEventListener('click', () => {
+		if (typeof toggleServerInfo === 'function') {
+			toggleServerInfo(false)
+			return
+		}
+
+		localStorage['emcdynmapplus-serverinfo'] = 'false'
+		panel.hidden = true
+		const checkbox = document.querySelector('#toggle-serverinfo')
+		if (checkbox && 'checked' in checkbox) checkbox.checked = false
+	})
 	addServerInfoPlaceholder(panel, 'vote-party', 'Votes until VP')
 	addElement(panel, createElement('br'))
 	addServerInfoPlaceholder(panel, 'online-players-count', 'Online Players')
