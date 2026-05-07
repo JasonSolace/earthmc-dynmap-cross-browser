@@ -85,7 +85,7 @@ test("map-config exposes active border and chunk settings per map", () => {
 	assert.deepEqual(normalize(mapConfig.getPlanningLeafletProjection("nostra")), {
 		xScale: 32,
 		zScale: -32,
-		zOffset: -16,
+		zOffset: 0,
 	});
 });
 

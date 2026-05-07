@@ -5,6 +5,10 @@ if (globalThis[PLANNING_STATE_KEY]) return;
 function createPlanningState({
 	storage = null,
 	plannerStorageKey = "emcdynmapplus-planner-nations",
+	planningModeStorageKey = "emcdynmapplus-planning-mode",
+	existingNationStorageKey = "emcdynmapplus-planning-existing-nation",
+	existingPlannedTownsStorageKey = "emcdynmapplus-planning-existing-planned-towns",
+	existingTownCoordinatesStorageKey = "emcdynmapplus-planning-existing-town-coordinates-v2",
 	planningDefaultRangeKey = "emcdynmapplus-planning-default-range",
 	defaultPlanningNationRange = 5000,
 	defaultPlanningTownRange = 1500,
@@ -61,6 +65,22 @@ function createPlanningState({
 		}
 	}
 
+	function removeStorageValue(key) {
+		const targetStorage = getStorage();
+		if (!targetStorage || !key) return false;
+
+		try {
+			if (typeof targetStorage.removeItem === "function") {
+				targetStorage.removeItem(key);
+			} else {
+				delete targetStorage[key];
+			}
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
 	function normalizePlanningRange(value) {
 		const numericValue = Number(value);
 		if (!Number.isFinite(numericValue)) return null;
@@ -102,7 +122,11 @@ function createPlanningState({
 			if (!stored) return [];
 
 			const parsed = JSON.parse(stored);
-			return Array.isArray(parsed) ? parsed : [];
+			return Array.isArray(parsed)
+				? parsed
+					.map((nation) => normalizePlanningNation(nation))
+					.filter((nation) => nation != null)
+				: [];
 		} catch {
 			return [];
 		}
@@ -125,9 +149,11 @@ function createPlanningState({
 					: `Town ${index + 1}`,
 			x: Math.round(x),
 			z: Math.round(z),
-			rangeRadiusBlocks: Number.isFinite(rangeRadiusBlocks)
-				? Math.max(0, Math.round(rangeRadiusBlocks))
-				: resolvedDefaultPlanningTown.rangeRadiusBlocks,
+			rangeRadiusBlocks: resolvedDefaultPlanningTown.rangeRadiusBlocks,
+			...(typeof town?.source === "string" && town.source
+				? { source: town.source }
+				: {}),
+			...(town?.isCapital === true ? { isCapital: true } : {}),
 		};
 	}
 
@@ -155,12 +181,18 @@ function createPlanningState({
 					? nation.outlineColor
 					: resolvedDefaultPlanningNation.outlineColor,
 			rangeRadiusBlocks: Number.isFinite(rangeRadiusBlocks)
-				? Math.max(0, Math.round(rangeRadiusBlocks))
+				? resolvedDefaultPlanningNation.rangeRadiusBlocks
 				: getPlanningDefaultRange(),
 			center: {
 				x: Math.round(x),
 				z: Math.round(z),
 			},
+			...(typeof nation?.source === "string" && nation.source
+				? { source: nation.source }
+				: {}),
+			...(typeof nation?.existingNationName === "string" && nation.existingNationName
+				? { existingNationName: nation.existingNationName }
+				: {}),
 			towns: Array.isArray(nation?.towns)
 				? nation.towns
 					.map((town, index) => normalizePlanningTown(town, index))
@@ -245,21 +277,308 @@ function createPlanningState({
 	}
 
 	function getPlanningDefaultRange() {
-		const savedRange = normalizePlanningRange(
-			readStorageValue(planningDefaultRangeKey),
-		);
-		return savedRange > 0 ? savedRange : defaultPlanningNationRange;
+		return defaultPlanningNationRange;
 	}
 
 	function setPlanningDefaultRange(range) {
 		const normalizedRange = normalizePlanningRange(range);
 		if (normalizedRange == null) return null;
-		writeStorageValue(planningDefaultRangeKey, String(normalizedRange));
-		return normalizedRange;
+		writeStorageValue(planningDefaultRangeKey, String(defaultPlanningNationRange));
+		return defaultPlanningNationRange;
+	}
+
+	function normalizePlanningMode(mode) {
+		return mode === "planned" ? "planned" : "existing";
+	}
+
+	function getPlanningMode() {
+		return normalizePlanningMode(readStorageValue(planningModeStorageKey));
+	}
+
+	function saveExistingPlanningTowns(towns) {
+		writeStorageValue(
+			existingPlannedTownsStorageKey,
+			JSON.stringify(
+				Array.isArray(towns)
+					? towns
+						.map((town, index) =>
+							normalizePlanningTown(
+								{
+									...town,
+									source: "planned",
+								},
+								index,
+							),
+						)
+						.filter((town) => town != null)
+					: [],
+			),
+		);
+	}
+
+	function loadExistingPlanningTowns() {
+		try {
+			const stored = readStorageValue(existingPlannedTownsStorageKey);
+			if (!stored) return [];
+
+			const parsed = JSON.parse(stored);
+			return Array.isArray(parsed)
+				? parsed
+					.map((town, index) =>
+						normalizePlanningTown(
+							{
+								...town,
+								source: "planned",
+							},
+							index,
+						),
+					)
+					.filter((town) => town != null)
+				: [];
+		} catch {
+			return [];
+		}
+	}
+
+	function normalizeExistingTownCoordinateKey(nationName, townName) {
+		if (typeof nationName !== "string" || typeof townName !== "string") return null;
+		const normalizedNation = nationName.trim().toLowerCase();
+		const normalizedTown = townName.trim().toLowerCase();
+		if (!normalizedNation || !normalizedTown) return null;
+		return `${normalizedNation}:${normalizedTown}`;
+	}
+
+	function loadExistingTownCoordinates() {
+		try {
+			const stored = readStorageValue(existingTownCoordinatesStorageKey);
+			if (!stored) return {};
+
+			const parsed = JSON.parse(stored);
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+				return {};
+			}
+
+			const normalizedEntries = {};
+			for (const [key, coords] of Object.entries(parsed)) {
+				const x = Number(coords?.x);
+				const z = Number(coords?.z);
+				if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+				normalizedEntries[String(key).toLowerCase()] = {
+					x: Math.round(x),
+					z: Math.round(z),
+				};
+			}
+			return normalizedEntries;
+		} catch {
+			return {};
+		}
+	}
+
+	function saveExistingTownCoordinates(coordinatesByKey = {}) {
+		const normalizedEntries = {};
+		if (coordinatesByKey && typeof coordinatesByKey === "object") {
+			for (const [key, coords] of Object.entries(coordinatesByKey)) {
+				const x = Number(coords?.x);
+				const z = Number(coords?.z);
+				if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+				normalizedEntries[String(key).toLowerCase()] = {
+					x: Math.round(x),
+					z: Math.round(z),
+				};
+			}
+		}
+
+		writeStorageValue(
+			existingTownCoordinatesStorageKey,
+			JSON.stringify(normalizedEntries),
+		);
+		return normalizedEntries;
+	}
+
+	function clearPlanningSessionForMode(nextMode) {
+		savePlanningNations([]);
+		saveExistingPlanningTowns([]);
+		if (nextMode !== "existing") {
+			removeStorageValue(existingNationStorageKey);
+		}
+	}
+
+	function setPlanningMode(mode, options = {}) {
+		const nextMode = normalizePlanningMode(mode);
+		const previousMode = getPlanningMode();
+		const shouldClear = options?.clear !== false && previousMode !== nextMode;
+		writeStorageValue(planningModeStorageKey, nextMode);
+		if (shouldClear) clearPlanningSessionForMode(nextMode);
+		return nextMode;
+	}
+
+	function getSelectedExistingNationName() {
+		const nationName = readStorageValue(existingNationStorageKey);
+		return typeof nationName === "string" && nationName.trim()
+			? nationName.trim()
+			: null;
+	}
+
+	function setSelectedExistingNationName(nationName, options = {}) {
+		const normalizedName =
+			typeof nationName === "string" && nationName.trim()
+				? nationName.trim()
+				: null;
+		setPlanningMode("existing", { clear: options?.clearMode !== false });
+		savePlanningNations([]);
+		if (options?.clearPlannedTowns !== false) saveExistingPlanningTowns([]);
+		if (!normalizedName) {
+			removeStorageValue(existingNationStorageKey);
+			return null;
+		}
+		writeStorageValue(existingNationStorageKey, normalizedName);
+		return normalizedName;
+	}
+
+	function normalizeParsedPlanningMarker(marker) {
+		const nationName =
+			typeof marker?.nationName === "string" && marker.nationName.trim()
+				? marker.nationName.trim()
+				: null;
+		const townName =
+			typeof marker?.townName === "string" && marker.townName.trim()
+				? marker.townName.trim()
+				: null;
+		const x = Number(marker?.x);
+		const z = Number(marker?.z);
+		if (!nationName || !townName || !Number.isFinite(x) || !Number.isFinite(z)) {
+			return null;
+		}
+
+		return {
+			nationName,
+			townName,
+			x: Math.round(x),
+			z: Math.round(z),
+			isCapital: marker?.isCapital === true,
+		};
+	}
+
+	function getExistingNationOptions(parsedMarkers = []) {
+		const optionsByName = new Map();
+		for (const marker of Array.isArray(parsedMarkers) ? parsedMarkers : []) {
+			const normalized = normalizeParsedPlanningMarker(marker);
+			if (!normalized) continue;
+
+			const option = optionsByName.get(normalized.nationName) ?? {
+				name: normalized.nationName,
+				townCount: 0,
+				hasCapital: false,
+				capitalTownName: null,
+			};
+			option.townCount += 1;
+			if (normalized.isCapital) {
+				option.hasCapital = true;
+				option.capitalTownName = normalized.townName;
+			}
+			optionsByName.set(normalized.nationName, option);
+		}
+
+		return [...optionsByName.values()].sort((a, b) =>
+			a.name.localeCompare(b.name),
+		);
+	}
+
+	function buildExistingPlanningNation(
+		parsedMarkers = [],
+		nationName = getSelectedExistingNationName(),
+		options = {},
+	) {
+		const selectedNationName =
+			typeof nationName === "string" && nationName.trim()
+				? nationName.trim()
+				: null;
+		if (!selectedNationName) return null;
+
+		const markers = (Array.isArray(parsedMarkers) ? parsedMarkers : [])
+			.map(normalizeParsedPlanningMarker)
+			.filter(
+				(marker) =>
+					marker != null &&
+					marker.nationName.toLowerCase() === selectedNationName.toLowerCase(),
+			);
+		const capital = markers.find((marker) => marker.isCapital) ?? null;
+		if (!capital) return null;
+		const townCoordinatesByName =
+			options?.townCoordinatesByName &&
+			typeof options.townCoordinatesByName === "object"
+				? options.townCoordinatesByName
+				: loadExistingTownCoordinates();
+		const getTownCoordinates = (marker) => {
+			const key = normalizeExistingTownCoordinateKey(
+				selectedNationName,
+				marker.townName,
+			);
+			const coords = key ? townCoordinatesByName[key] : null;
+			const x = Number(coords?.x);
+			const z = Number(coords?.z);
+			return Number.isFinite(x) && Number.isFinite(z)
+				? { x: Math.round(x), z: Math.round(z) }
+				: { x: marker.x, z: marker.z };
+		};
+		const capitalCoords = getTownCoordinates(capital);
+
+		const realTowns = markers
+			.map((marker, index) =>
+				normalizePlanningTown(
+					{
+						id: `existing-town:${selectedNationName}:${marker.townName}`,
+						name: marker.townName,
+						...getTownCoordinates(marker),
+						source: "existing",
+						isCapital: marker.isCapital,
+					},
+					index,
+				),
+			)
+			.filter((town) => town != null);
+		const plannedTowns = Array.isArray(options?.plannedTowns)
+			? options.plannedTowns
+			: loadExistingPlanningTowns();
+
+		return normalizePlanningNation({
+			id: `existing-nation:${selectedNationName}`,
+			name: selectedNationName,
+			source: "existing",
+			existingNationName: selectedNationName,
+			center: {
+				x: capitalCoords.x,
+				z: capitalCoords.z,
+			},
+			towns: [
+				...realTowns,
+				...plannedTowns.map((town) => ({
+					...town,
+					source: "planned",
+				})),
+			],
+		});
+	}
+
+	function loadRenderablePlanningNations({ parsedMarkers = [] } = {}) {
+		if (getPlanningMode() !== "existing") return loadPlanningNations();
+
+		const existingNation = buildExistingPlanningNation(
+			parsedMarkers,
+			getSelectedExistingNationName(),
+			{
+				plannedTowns: loadExistingPlanningTowns(),
+			},
+		);
+		return existingNation ? [existingNation] : [];
 	}
 
 	return {
 		plannerStorageKey,
+		planningModeStorageKey,
+		existingNationStorageKey,
+		existingPlannedTownsStorageKey,
+		existingTownCoordinatesStorageKey,
 		planningDefaultRangeKey,
 		defaultPlanningNationRange,
 		defaultPlanningTownRange,
@@ -275,6 +594,18 @@ function createPlanningState({
 		getPlanningDefaultRange,
 		setPlanningDefaultRange,
 		normalizePlanningNation,
+		getPlanningMode,
+		setPlanningMode,
+		getSelectedExistingNationName,
+		setSelectedExistingNationName,
+		loadExistingPlanningTowns,
+		saveExistingPlanningTowns,
+		normalizeExistingTownCoordinateKey,
+		loadExistingTownCoordinates,
+		saveExistingTownCoordinates,
+		getExistingNationOptions,
+		buildExistingPlanningNation,
+		loadRenderablePlanningNations,
 	};
 }
 

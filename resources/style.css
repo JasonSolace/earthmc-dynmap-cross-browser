@@ -492,6 +492,14 @@ select {
 	gap: 8px;
 }
 
+.planning-subsection[hidden],
+.planning-existing-nation-field[hidden],
+.planning-section-meta[hidden],
+.planning-inline-note[hidden],
+.planning-town-icon-button[hidden] {
+	display: none !important;
+}
+
 .planning-subsection-header {
 	display: flex;
 	align-items: baseline;
@@ -649,7 +657,7 @@ select {
 .planning-town-list {
 	display: grid;
 	gap: 1px;
-	font-family: "Consolas", "SFMono-Regular", "Cascadia Mono", monospace;
+	font-family: "Inter", "Segoe UI", sans-serif;
 }
 
 .planning-town-row {
@@ -664,6 +672,16 @@ select {
 	border: 0;
 	background: transparent;
 	border-radius: 4px;
+}
+
+.planning-town-row[data-source="existing"] {
+	grid-template-columns: minmax(0, 1fr) 22px;
+	padding: 4px 6px;
+}
+
+.planning-town-row[data-source="existing"] .planning-town-row-label,
+.planning-town-row[data-source="existing"] .planning-town-row-actions {
+	display: none;
 }
 
 .planning-town-row:hover,
@@ -686,11 +704,16 @@ select {
 	text-overflow: ellipsis;
 }
 
+.planning-town-row[data-source="existing"] .planning-town-row-coords {
+	font-variant-numeric: normal;
+	font-weight: 650;
+}
+
 .planning-town-row-status {
 	width: 22px;
 	text-align: center;
 	font-weight: 800;
-	color: var(--success-color);
+	color: var(--text-muted);
 	font-size: 15px;
 }
 
@@ -740,9 +763,14 @@ select {
 
 .planning-town-toolbar {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto;
+	grid-template-columns: minmax(0, 1fr);
 	align-items: end;
 	gap: 8px;
+}
+
+.planning-town-toolbar .sidebar-button {
+	width: 100%;
+	justify-self: stretch;
 }
 
 .planning-town-toolbar-range {
@@ -758,7 +786,75 @@ select {
 }
 
 .planning-nation-toolbar {
-	grid-template-columns: minmax(0, 1fr) auto auto;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.planning-nation-toolbar .planning-town-icon-button:not([hidden]) {
+	justify-self: end;
+}
+
+.planning-existing-nation-field {
+	position: relative;
+	display: grid;
+	gap: 4px;
+}
+
+.planning-existing-nation-combobox {
+	position: relative;
+	display: grid;
+}
+
+.planning-existing-nation-options {
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
+	right: 0;
+	z-index: 1400;
+	display: grid;
+	max-height: 220px;
+	overflow-y: auto;
+	padding: 4px;
+	background: var(--panel-bg);
+	border: 1px solid var(--panel-border);
+	border-radius: 8px;
+	box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22);
+}
+
+.planning-existing-nation-options[hidden] {
+	display: none !important;
+}
+
+.planning-existing-nation-option {
+	appearance: none;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--text-strong);
+	padding: 7px 8px;
+	font: inherit;
+	font-size: 12px;
+	font-weight: 650;
+	text-align: left;
+	cursor: pointer;
+}
+
+.planning-existing-nation-option:hover,
+.planning-existing-nation-option:focus-visible {
+	background: rgba(209, 137, 45, 0.12);
+	outline: none;
+}
+
+.planning-existing-nation-option:disabled {
+	color: var(--text-muted);
+	cursor: default;
+	opacity: 0.75;
+}
+
+.planning-existing-nation-empty {
+	padding: 8px;
+	color: var(--text-muted);
+	font-size: 12px;
+	font-weight: 650;
 }
 
 .planning-center-meta {

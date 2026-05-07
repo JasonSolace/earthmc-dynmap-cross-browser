@@ -39,17 +39,21 @@ test("planning leaflet adapter uses explicit projection models", () => {
 			projectionModel: {
 				xScale: 32,
 				zScale: -32,
-				zOffset: -16,
+				zOffset: 0,
 			},
 		});
 	assert.deepEqual(normalize(nostraAdapter.getModel()), {
 		xScale: 32,
 		zScale: -32,
-		zOffset: -16,
+		zOffset: 0,
 	});
 	assert.deepEqual(normalize(nostraAdapter.worldToLatLng({ x: 3392, z: -8800 })), {
-		lat: 274.5,
+		lat: 275,
 		lng: 106,
+	});
+	assert.deepEqual(normalize(nostraAdapter.worldToLatLng({ x: 27960, z: -312 })), {
+		lat: 9.75,
+		lng: 873.75,
 	});
 });
 
@@ -65,7 +69,7 @@ test("planning leaflet adapter reads projection models from shared map config", 
 				getCurrentMapType: () => "nostra",
 				getPlanningLeafletProjection: (mapType) =>
 					mapType === "nostra"
-						? { xScale: 32, zScale: -32, zOffset: -16 }
+						? { xScale: 32, zScale: -32, zOffset: 0 }
 						: { xScale: 8, zScale: -8, zOffset: -4 },
 			},
 		},
@@ -76,10 +80,14 @@ test("planning leaflet adapter reads projection models from shared map config", 
 	assert.deepEqual(normalize(adapter.getModel()), {
 		xScale: 32,
 		zScale: -32,
-		zOffset: -16,
+		zOffset: 0,
 	});
-	assert.deepEqual(normalize(adapter.latLngToWorld({ lat: 274.5, lng: 106 })), {
+	assert.deepEqual(normalize(adapter.latLngToWorld({ lat: 275, lng: 106 })), {
 		x: 3392,
 		z: -8800,
+	});
+	assert.deepEqual(normalize(adapter.latLngToWorld({ lat: 9.75, lng: 873.75 })), {
+		x: 27960,
+		z: -312,
 	});
 });

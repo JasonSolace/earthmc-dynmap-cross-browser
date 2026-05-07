@@ -19,6 +19,8 @@ function createMarkerEnginePlanning({
 	pageTileSummaryAttr = "data-emcdynmapplus-tile-zoom-summary",
 	appendDynmapPlusManagedLayer,
 	planningLayerDefinition,
+	getParsedMarkers = () => [],
+	fetchExistingTownCoordinates = async () => null,
 	getPrimaryLeafletMap = () => null,
 	isPlanningModeActive = () => true,
 	debugInfo = () => {},
@@ -66,7 +68,10 @@ function createMarkerEnginePlanning({
 	const polygonClipping = globalThis.polygonClipping ?? null;
 	const planningRuntime = planningRuntimeFactory({
 		planningRuntimePrefix: planningLayerPrefix,
-		loadPlanningNations: () => planningState.loadPlanningNations(),
+		loadPlanningNations: () =>
+			planningState.loadRenderablePlanningNations({
+				parsedMarkers: getParsedMarkers(),
+			}),
 		debugInfo,
 	});
 	const planningProjection = planningProjectionFactory({
@@ -232,6 +237,71 @@ function createMarkerEnginePlanning({
 			nationCount: planningNations.length,
 		});
 		return planningNations;
+	}
+
+	async function refreshExistingTownCoordinates(source = "existing-town-coordinate-refresh") {
+		if (planningState.getPlanningMode?.() !== "existing") return false;
+		const selectedNationName = planningState.getSelectedExistingNationName?.();
+		if (!selectedNationName) return false;
+
+		const parsedMarkers = Array.isArray(getParsedMarkers()) ? getParsedMarkers() : [];
+		const townNames = [
+			...new Set(
+				parsedMarkers
+					.filter(
+						(marker) =>
+							typeof marker?.nationName === "string" &&
+							marker.nationName.toLowerCase() === selectedNationName.toLowerCase() &&
+							typeof marker?.townName === "string" &&
+							marker.townName.trim(),
+					)
+					.map((marker) => marker.townName.trim()),
+			),
+		];
+		if (townNames.length === 0) return false;
+
+		let fetchedCoordinates = null;
+		try {
+			fetchedCoordinates = await fetchExistingTownCoordinates(
+				selectedNationName,
+				townNames,
+			);
+		} catch (err) {
+			debugInfo(`${planningLayerPrefix}: failed to refresh existing town coordinates`, {
+				selectedNationName,
+				error: String(err),
+			});
+			return false;
+		}
+		if (!fetchedCoordinates || typeof fetchedCoordinates !== "object") {
+			return false;
+		}
+
+		const mergedCoordinates = planningState.loadExistingTownCoordinates?.() ?? {};
+		for (const [townName, coords] of Object.entries(fetchedCoordinates)) {
+			const key = planningState.normalizeExistingTownCoordinateKey?.(
+				selectedNationName,
+				townName,
+			);
+			if (!key) continue;
+			const x = Number(coords?.x);
+			const z = Number(coords?.z);
+			if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+			mergedCoordinates[key] = {
+				x: Math.round(x),
+				z: Math.round(z),
+			};
+		}
+		planningState.saveExistingTownCoordinates?.(mergedCoordinates);
+
+		try {
+			document.dispatchEvent(
+				new CustomEvent("EMCDYNMAPPLUS_PLANNING_STATE_UPDATED", {
+					detail: JSON.stringify({ source }),
+				}),
+			);
+		} catch {}
+		return true;
 	}
 
 	function createPlanningCircleVertices(point, radiusBlocks, segments = 96) {
@@ -787,7 +857,9 @@ function createMarkerEnginePlanning({
 	}
 
 	function addPlanningLayer(data) {
-		const planningNations = loadPlanningNations()
+		const planningNations = planningState.loadRenderablePlanningNations({
+			parsedMarkers: getParsedMarkers(),
+		})
 			.map((nation) => planningState.normalizePlanningNation(nation))
 			.filter((nation) => nation != null);
 		if (planningNations.length === 0) {
@@ -831,6 +903,7 @@ function createMarkerEnginePlanning({
 		getPlanningRenderMeasurements,
 		exposePlanningDebugHelpers,
 		addPlanningLayer,
+		refreshExistingTownCoordinates,
 		isLivePlanningRendererSupported: () => true,
 	};
 }

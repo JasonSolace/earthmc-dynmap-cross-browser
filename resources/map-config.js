@@ -81,7 +81,7 @@
 				planningLeafletProjection: Object.freeze({
 					xScale: 32,
 					zScale: -32,
-					zOffset: -16,
+					zOffset: 0,
 				}),
 				nationBonusTiers: LEGACY_AURORA_NATION_BONUS_TIERS,
 			}),

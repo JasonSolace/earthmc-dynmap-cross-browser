@@ -173,6 +173,7 @@ test("marker engine converts old dynmap marker payloads and removes shop areas",
 test("marker engine appends a sanitized planning layer from stored nations", () => {
 	const { exports } = loadMarkerEngine({
 		localStorageSeed: {
+			"emcdynmapplus-planning-mode": "planned",
 			"emcdynmapplus-planner-nations": JSON.stringify([
 				{
 					name: "Test Nation",
@@ -221,7 +222,7 @@ test("marker engine appends a sanitized planning layer from stored nations", () 
 	assert.equal(planningLayer.markers.length, 3);
 	assert.match(planningLayer.markers[0].popup, /X: 13/);
 	assert.match(planningLayer.markers[0].popup, /Z: -8/);
-	assert.match(planningLayer.markers[0].popup, /Range: 4097 blocks/);
+	assert.match(planningLayer.markers[0].popup, /Range: 5000 blocks/);
 	assert.match(planningLayer.markers[0].popup, /Connected towns: 1/);
 	assert.match(planningLayer.markers[2].popup, /Status: Connected/);
 	assert.match(planningLayer.markers[2].popup, /X: 100/);
@@ -230,6 +231,7 @@ test("marker engine appends a sanitized planning layer from stored nations", () 
 test("marker engine renders disconnected planning town coverage separately", () => {
 	const { exports } = loadMarkerEngine({
 		localStorageSeed: {
+			"emcdynmapplus-planning-mode": "planned",
 			"emcdynmapplus-planner-nations": JSON.stringify([
 				{
 					name: "Chain Nation",
@@ -243,6 +245,11 @@ test("marker engine renders disconnected planning town coverage separately", () 
 						},
 						{
 							x: 6500,
+							z: 0,
+							rangeRadiusBlocks: 1500,
+						},
+						{
+							x: 9001,
 							z: 0,
 							rangeRadiusBlocks: 1500,
 						},
@@ -455,6 +462,70 @@ test("marker engine finds the territory layer even when non-claim overlays come 
 
 	assert.equal(Array.isArray(result), true);
 	assert.ok(result.find((layer) => layer.id === "towny"));
+});
+
+test("marker engine caches existing town coordinates when OAPI omits town names", async () => {
+	const { exports, localStorage } = loadMarkerEngine({
+		localStorageSeed: {
+			"emcdynmapplus-planning-mode": "existing",
+			"emcdynmapplus-planning-existing-nation": "Narmada",
+		},
+		fetchImpl: async (url, options = null) => ({
+			ok: true,
+			status: 200,
+			url: String(url),
+			clone() {
+				return this;
+			},
+			async json() {
+				if (String(url).includes("api.earthmc.net")) {
+					const body = JSON.parse(options?.body ?? "{}");
+					assert.deepEqual(body.query, ["Sita"]);
+					assert.deepEqual(body.template, {
+						name: true,
+						coordinates: true,
+					});
+					return [
+						{
+							coordinates: {
+								homeBlock: [1747, -20],
+								spawn: { x: 27967.322, z: -312.439 },
+							},
+						},
+					];
+				}
+
+				return {};
+			},
+		}),
+	});
+
+	await exports.modifyMarkersInPage([
+		{
+			id: "towny",
+			name: "Territory",
+			markers: [
+				{
+					type: "polygon",
+					tooltip:
+						'<div><span style="font-size:120%;"><b>Sita</b></span> (Capital of Narmada)\n    <i>/town set board [msg]</i></div>',
+					popup:
+						'<div><span style="font-size:120%;"><b>Sita</b></span><br>\nMayor: <b>MayorOne</b>\n\t<br>\nCouncillors: <b>None</b>\n\t<br>\n<details><summary>Residents</summary>\n    \tMayorOne\n   \t</details>\n   \t<br>\n<i>/town set board [msg]</i> \n    <br>\nFlags: <b>true</b> <b>false</b></div>',
+					points: [[[{ x: 27967, z: -312 }]]],
+				},
+			],
+		},
+	]);
+
+	assert.deepEqual(
+		JSON.parse(localStorage["emcdynmapplus-planning-existing-town-coordinates-v2"]),
+		{
+			"narmada:sita": {
+				x: 27960,
+				z: -312,
+			},
+		},
+	);
 });
 
 test("marker engine skips squaremap polygons without tooltip metadata", async () => {

@@ -472,7 +472,7 @@ test("menu normalizes stored planning nation data", () => {
 			name: "Planning Nation",
 			color: "#d98936",
 			outlineColor: "#fff3cf",
-			rangeRadiusBlocks: 8192,
+			rangeRadiusBlocks: 5000,
 			center: { x: 11, z: -4 },
 			towns: [
 				{
@@ -480,7 +480,7 @@ test("menu normalizes stored planning nation data", () => {
 					name: "Alpha Town",
 					x: 101,
 					z: -55,
-					rangeRadiusBlocks: 1001,
+					rangeRadiusBlocks: 1500,
 				},
 				{
 					id: "hardcoded-demo-town-2",
@@ -497,7 +497,7 @@ test("menu normalizes stored planning nation data", () => {
 		exports.normalizePlanningNation({
 			center: { x: 1, z: 2 },
 		}).rangeRadiusBlocks,
-		3200,
+		5000,
 	);
 	localStorage["emcdynmapplus-planning-default-range"] = "0";
 	assert.equal(
@@ -815,6 +815,7 @@ test("planning allows chaining towns from connected town ranges", () => {
 	const { context, document, localStorage } = loadMenu({
 		localStorageSeed: {
 			"emcdynmapplus-mapmode": "planning",
+			"emcdynmapplus-planning-mode": "planned",
 			"emcdynmapplus-planner-nations": JSON.stringify([seedNation]),
 		},
 		extraGlobals: {
@@ -894,7 +895,7 @@ test("planning keeps disconnected towns and marks them in the sidebar", () => {
 			{
 				id: "town-1",
 				name: "Alpha Town",
-				x: 4900,
+				x: 6501,
 				z: 0,
 				rangeRadiusBlocks: 1500,
 			},
@@ -903,6 +904,7 @@ test("planning keeps disconnected towns and marks them in the sidebar", () => {
 	const { context, document, localStorage } = loadMenu({
 		localStorageSeed: {
 			"emcdynmapplus-mapmode": "planning",
+			"emcdynmapplus-planning-mode": "planned",
 			"emcdynmapplus-planner-nations": JSON.stringify([seedNation]),
 		},
 		extraGlobals: {
@@ -930,15 +932,9 @@ test("planning keeps disconnected towns and marks them in the sidebar", () => {
 	const sidebar = document.createElement("div");
 	context.EMCDYNMAPPLUS_MENU_PLANNING.addPlanningSection(sidebar);
 
-	const rangeInput = findById(sidebar, "planning-range-input");
-	assert.ok(rangeInput);
-	rangeInput.value = "4000";
-	rangeInput.dispatchEvent({ type: "change", target: rangeInput });
-
 	assert.equal(alerts.length, 0);
-	assert.equal(rangeInput.value, "4000");
 	const savedNation = JSON.parse(localStorage["emcdynmapplus-planner-nations"])[0];
-	assert.equal(savedNation.rangeRadiusBlocks, 4000);
+	assert.equal(savedNation.rangeRadiusBlocks, 5000);
 	const townList = findById(sidebar, "planning-town-list");
 	assert.ok(townList);
 	assert.equal(
@@ -949,7 +945,7 @@ test("planning keeps disconnected towns and marks them in the sidebar", () => {
 	);
 });
 
-test("planning town range updates existing and future towns together", () => {
+test("planning uses fixed town range for existing and future planned towns", () => {
 	const seedNation = {
 		id: "nation-1",
 		name: "Planning Nation",
@@ -975,6 +971,7 @@ test("planning town range updates existing and future towns together", () => {
 	const { context, document, localStorage } = loadMenu({
 		localStorageSeed: {
 			"emcdynmapplus-mapmode": "planning",
+			"emcdynmapplus-planning-mode": "planned",
 			"emcdynmapplus-planner-nations": JSON.stringify([seedNation]),
 		},
 		extraGlobals: {
@@ -1000,15 +997,10 @@ test("planning town range updates existing and future towns together", () => {
 	const sidebar = document.createElement("div");
 	context.EMCDYNMAPPLUS_MENU_PLANNING.addPlanningSection(sidebar);
 
-	const townRangeInput = findById(sidebar, "planning-town-range-input");
-	assert.ok(townRangeInput);
-	townRangeInput.value = "2000";
-	townRangeInput.dispatchEvent({ type: "change", target: townRangeInput });
-
 	let savedNation = JSON.parse(localStorage["emcdynmapplus-planner-nations"])[0];
 	assert.deepEqual(
 		savedNation.towns.map((town) => town.rangeRadiusBlocks),
-		[2000, 2000],
+		[1500, 1500],
 	);
 
 	const placeTownButton = findById(sidebar, "planning-place-town-button");
@@ -1024,7 +1016,7 @@ test("planning town range updates existing and future towns together", () => {
 	);
 
 	savedNation = JSON.parse(localStorage["emcdynmapplus-planner-nations"])[0];
-	assert.equal(savedNation.towns[2].rangeRadiusBlocks, 2000);
+	assert.equal(savedNation.towns[2].rangeRadiusBlocks, 1500);
 });
 
 test("planning can reposition an existing town from the sidebar", () => {
@@ -1049,6 +1041,7 @@ test("planning can reposition an existing town from the sidebar", () => {
 	const { context, document, localStorage } = loadMenu({
 		localStorageSeed: {
 			"emcdynmapplus-mapmode": "planning",
+			"emcdynmapplus-planning-mode": "planned",
 			"emcdynmapplus-planner-nations": JSON.stringify([seedNation]),
 		},
 		extraGlobals: {
@@ -1108,6 +1101,256 @@ test("planning can reposition an existing town from the sidebar", () => {
 	});
 });
 
+test("planning existing nation mode connects planned towns through real towns", async () => {
+	const alerts = [];
+	const { context, document, localStorage } = loadMenu({
+		localStorageSeed: {
+			"emcdynmapplus-mapmode": "planning",
+		},
+		extraGlobals: {
+			parsedMarkers: [
+				{
+					townName: "Capital Town",
+					nationName: "Nostra",
+					x: 0,
+					z: 0,
+					isCapital: true,
+				},
+				{
+					townName: "Border Town",
+					nationName: "Nostra",
+					x: 5000,
+					z: 0,
+					isCapital: false,
+				},
+			],
+			createElement: null,
+			addElement: null,
+			addSidebarSection: null,
+			getStoredCurrentMapMode() {
+				return "planning";
+			},
+			showAlert(message) {
+				alerts.push(message);
+			},
+		},
+	});
+	const createElement = createElementFactory(document);
+	const addElement = addElementFactory();
+	enableToggleAttribute(document.documentElement);
+	context.createElement = createElement;
+	context.addElement = addElement;
+	context.addSidebarSection = addSidebarSectionFactory(document);
+
+	const sidebar = document.createElement("div");
+	context.EMCDYNMAPPLUS_MENU_PLANNING.addPlanningSection(sidebar);
+
+	const existingModeButton = findById(sidebar, "planning-mode-existing-button");
+	assert.ok(existingModeButton);
+	existingModeButton.dispatchEvent({ type: "click", target: existingModeButton });
+
+	const existingInput = findById(sidebar, "planning-existing-nation-input");
+	assert.ok(existingInput);
+	existingInput.value = "Nostra";
+	existingInput.dispatchEvent({
+		type: "keydown",
+		key: "Enter",
+		target: existingInput,
+		preventDefault() {},
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+
+	const placeTownButton = findById(sidebar, "planning-place-town-button");
+	assert.ok(placeTownButton);
+	placeTownButton.dispatchEvent({ type: "click", target: placeTownButton });
+	document.dispatchEvent(
+		new context.CustomEvent("EMCDYNMAPPLUS_PLACE_PLANNING_NATION", {
+			detail: {
+				center: { x: 6500, z: 0 },
+				source: "test-existing-planned-town",
+			},
+		}),
+	);
+
+	assert.equal(
+		alerts.includes(
+			"Town centers must be placed within the nation range or a connected town range.",
+		),
+		false,
+	);
+	assert.equal(localStorage["emcdynmapplus-planning-mode"], "existing");
+	assert.equal(localStorage["emcdynmapplus-planning-existing-nation"], "Nostra");
+	assert.deepEqual(
+		JSON.parse(localStorage["emcdynmapplus-planning-existing-planned-towns"])
+			.map((town) => ({
+				x: town.x,
+				z: town.z,
+				rangeRadiusBlocks: town.rangeRadiusBlocks,
+				source: town.source,
+			})),
+		[
+			{
+				x: 6500,
+				z: 0,
+				rangeRadiusBlocks: 1500,
+				source: "planned",
+			},
+		],
+	);
+	assert.deepEqual(JSON.parse(localStorage["emcdynmapplus-planner-nations"]), []);
+});
+
+test("planning existing nation input caches unnamed OAPI town coordinates by query order", async () => {
+	const postBodies = [];
+	const { context, document, localStorage } = loadMenu({
+		localStorageSeed: {
+			"emcdynmapplus-mapmode": "planning",
+		},
+		extraGlobals: {
+			parsedMarkers: [
+				{
+					townName: "Sita",
+					nationName: "Narmada",
+					x: 27967,
+					z: -312,
+					isCapital: true,
+				},
+			],
+			createElement: null,
+			addElement: null,
+			addSidebarSection: null,
+			getStoredCurrentMapMode() {
+				return "planning";
+			},
+			getCurrentOapiUrl(resourcePath) {
+				return `https://api.earthmc.net/v4/${resourcePath}`;
+			},
+			async postJSON(_url, body) {
+				postBodies.push(body);
+				return [
+					{
+						coordinates: {
+							homeBlock: [1747, -20],
+							spawn: { x: 27967.322, z: -312.439 },
+						},
+					},
+				];
+			},
+		},
+	});
+	const createElement = createElementFactory(document);
+	const addElement = addElementFactory();
+	enableToggleAttribute(document.documentElement);
+	context.createElement = createElement;
+	context.addElement = addElement;
+	context.addSidebarSection = addSidebarSectionFactory(document);
+
+	const sidebar = document.createElement("div");
+	context.EMCDYNMAPPLUS_MENU_PLANNING.addPlanningSection(sidebar);
+
+	const existingInput = findById(sidebar, "planning-existing-nation-input");
+	existingInput.value = "Narmada";
+	existingInput.dispatchEvent({
+		type: "keydown",
+		key: "Enter",
+		target: existingInput,
+		preventDefault() {},
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+
+	assert.deepEqual(normalize(postBodies), [
+		{
+			query: ["Sita"],
+			template: {
+				name: true,
+				coordinates: true,
+			},
+		},
+	]);
+	assert.deepEqual(
+		JSON.parse(localStorage["emcdynmapplus-planning-existing-town-coordinates-v2"]),
+		{
+			"narmada:sita": {
+				x: 27960,
+				z: -312,
+			},
+		},
+	);
+});
+
+test("planning source mode switches clear the incompatible planning session", async () => {
+	const seedNation = {
+		id: "nation-1",
+		name: "Planning Nation",
+		center: { x: 0, z: 0 },
+		towns: [{ id: "town-1", x: 100, z: 100 }],
+	};
+	const { context, document, localStorage } = loadMenu({
+		localStorageSeed: {
+			"emcdynmapplus-mapmode": "planning",
+			"emcdynmapplus-planning-mode": "planned",
+			"emcdynmapplus-planner-nations": JSON.stringify([seedNation]),
+		},
+		extraGlobals: {
+			parsedMarkers: [
+				{
+					townName: "Capital Town",
+					nationName: "Nostra",
+					x: 0,
+					z: 0,
+					isCapital: true,
+				},
+			],
+			createElement: null,
+			addElement: null,
+			addSidebarSection: null,
+			getStoredCurrentMapMode() {
+				return "planning";
+			},
+			showAlert() {},
+		},
+	});
+	const createElement = createElementFactory(document);
+	const addElement = addElementFactory();
+	enableToggleAttribute(document.documentElement);
+	context.createElement = createElement;
+	context.addElement = addElement;
+	context.addSidebarSection = addSidebarSectionFactory(document);
+
+	const sidebar = document.createElement("div");
+	context.EMCDYNMAPPLUS_MENU_PLANNING.addPlanningSection(sidebar);
+
+	findById(sidebar, "planning-mode-existing-button").dispatchEvent({
+		type: "click",
+		target: findById(sidebar, "planning-mode-existing-button"),
+	});
+	assert.deepEqual(JSON.parse(localStorage["emcdynmapplus-planner-nations"]), []);
+
+	const existingInput = findById(sidebar, "planning-existing-nation-input");
+	existingInput.value = "Nostra";
+	existingInput.dispatchEvent({
+		type: "keydown",
+		key: "Enter",
+		target: existingInput,
+		preventDefault() {},
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+	localStorage["emcdynmapplus-planning-existing-planned-towns"] = JSON.stringify([
+		{ x: 400, z: 400 },
+	]);
+
+	findById(sidebar, "planning-mode-planned-button").dispatchEvent({
+		type: "click",
+		target: findById(sidebar, "planning-mode-planned-button"),
+	});
+	assert.equal(localStorage["emcdynmapplus-planning-mode"], "planned");
+	assert.equal(localStorage["emcdynmapplus-planning-existing-nation"], undefined);
+	assert.deepEqual(
+		JSON.parse(localStorage["emcdynmapplus-planning-existing-planned-towns"]),
+		[],
+	);
+});
+
 test("planning cursor preview shows the active placement label and range", () => {
 	const seedNation = {
 		id: "nation-1",
@@ -1128,6 +1371,7 @@ test("planning cursor preview shows the active placement label and range", () =>
 	const { context, document } = loadMenu({
 		localStorageSeed: {
 			"emcdynmapplus-mapmode": "planning",
+			"emcdynmapplus-planning-mode": "planned",
 			"emcdynmapplus-planner-nations": JSON.stringify([seedNation]),
 		},
 		extraGlobals: {

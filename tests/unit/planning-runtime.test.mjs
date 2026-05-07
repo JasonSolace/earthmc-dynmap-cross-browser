@@ -43,9 +43,13 @@ test("planning runtime syncs initial storage state and refreshes on update event
 	assert.deepEqual(normalize(initialSnapshot), {
 		nations: [
 			{
+				id: "hardcoded-demo-nation",
 				name: "First Nation",
+				color: "#d98936",
+				outlineColor: "#fff3cf",
 				center: { x: 10, z: -20 },
 				rangeRadiusBlocks: 5000,
+				towns: [],
 			},
 		],
 		source: "planning-runtime-init",
@@ -70,9 +74,13 @@ test("planning runtime syncs initial storage state and refreshes on update event
 	assert.deepEqual(normalize(runtime.getSnapshot()), {
 		nations: [
 			{
+				id: "hardcoded-demo-nation",
 				name: "Second Nation",
+				color: "#d98936",
+				outlineColor: "#fff3cf",
 				center: { x: 33, z: 44 },
-				rangeRadiusBlocks: 3200,
+				rangeRadiusBlocks: 5000,
+				towns: [],
 			},
 		],
 		source: "unit-test",

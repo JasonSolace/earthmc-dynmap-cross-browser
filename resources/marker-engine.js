@@ -395,6 +395,7 @@ const {
 	addPlanningLayer,
 	exposePlanningDebugHelpers,
 	getPlanningProjectionSignals,
+	refreshExistingTownCoordinates,
 	isLivePlanningRendererSupported,
 } = markerEnginePlanningFactory({
 	plannerStorageKey: PLANNER_STORAGE_KEY,
@@ -409,9 +410,76 @@ const {
 	pageTileSummaryAttr: PAGE_TILE_SUMMARY_ATTR,
 	appendDynmapPlusManagedLayer,
 	planningLayerDefinition: DYNMAP_PLUS_LAYER_DEFINITIONS.planningNations,
+	getParsedMarkers: () => parsedMarkers,
+	fetchExistingTownCoordinates: async (_nationName, townNames = []) => {
+		const names = [...new Set(
+			(Array.isArray(townNames) ? townNames : [])
+				.map((name) => String(name || "").trim())
+				.filter(Boolean),
+		)];
+		if (names.length === 0) return null;
+
+		const towns = await postJSON(getCurrentOapiUrl("towns"), {
+			query: names,
+			template: { name: true, coordinates: true },
+		});
+		if (!Array.isArray(towns)) return null;
+
+		const coordinatesByTownName = {};
+		for (const [index, town] of towns.entries()) {
+			const name =
+				typeof town?.name === "string" && town.name.trim()
+					? town.name.trim()
+					: names[index] ?? "";
+			const homeBlock = Array.isArray(town?.coordinates?.homeBlock)
+				? town.coordinates.homeBlock
+				: null;
+			const spawn = town?.coordinates?.spawn ?? null;
+			const homeBlockX = Number(homeBlock?.[0]);
+			const homeBlockZ = Number(homeBlock?.[1]);
+			const x = Number.isFinite(homeBlockX)
+				? homeBlockX * 16 + 8
+				: Number(spawn?.x);
+			const z = Number.isFinite(homeBlockZ)
+				? homeBlockZ * 16 + 8
+				: Number(spawn?.z);
+			if (!name || !Number.isFinite(x) || !Number.isFinite(z)) continue;
+			coordinatesByTownName[name] = {
+				x: Math.round(x),
+				z: Math.round(z),
+			};
+		}
+		return coordinatesByTownName;
+	},
 	getPrimaryLeafletMap,
 	isPlanningModeActive: () => currentMapMode() === "planning",
 	debugInfo: pageMarkersDebugInfo,
+});
+
+function notifyPlanningRenderableSourceUpdated(source = "parsed-markers-updated") {
+	try {
+		document.dispatchEvent(
+			new CustomEvent("EMCDYNMAPPLUS_PLANNING_STATE_UPDATED", {
+				detail: JSON.stringify({
+					source,
+				}),
+			}),
+		);
+	} catch {}
+}
+
+document.addEventListener("EMCDYNMAPPLUS_PLANNING_STATE_UPDATED", (event) => {
+	let detail = null;
+	try {
+		detail =
+			typeof event?.detail === "string"
+				? JSON.parse(event.detail)
+				: event?.detail ?? null;
+	} catch {
+		detail = null;
+	}
+	if (detail?.source === "existing-town-coordinates-updated") return;
+	refreshExistingTownCoordinates?.("existing-town-coordinates-updated");
 });
 
 async function getStyledBorders(resourcePath) {
@@ -556,14 +624,15 @@ async function modifyMarkersInPage(data) {
 				) || result;
 		}
 	}
-	if (mapMode === "planning" && !isLivePlanningRendererSupported()) {
-		result = addPlanningLayer(result);
-	}
-
 	claimLayer = getClaimLayer(result);
 	if (!claimLayer?.markers?.length) {
 		parsedMarkers = [];
 		syncParsedMarkers();
+		notifyPlanningRenderableSourceUpdated("parsed-markers-empty");
+		await refreshExistingTownCoordinates?.("parsed-markers-empty");
+		if (mapMode === "planning" && !isLivePlanningRendererSupported()) {
+			result = addPlanningLayer(result);
+		}
 		console.warn(`${MARKER_ENGINE_PREFIX}: map payload did not include a usable territory layer`, {
 			mapMode,
 			mapType: getCurrentMapType(),
@@ -623,6 +692,11 @@ async function modifyMarkersInPage(data) {
 	}
 
 	syncParsedMarkers();
+	notifyPlanningRenderableSourceUpdated("parsed-markers-updated");
+	await refreshExistingTownCoordinates?.("existing-town-coordinates-updated");
+	if (mapMode === "planning" && !isLivePlanningRendererSupported()) {
+		result = addPlanningLayer(result);
+	}
 
 	pageMarkersDebugInfo(`${MARKER_ENGINE_PREFIX}: modifyMarkers completed`, {
 		mapMode,
