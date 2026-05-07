@@ -1,8 +1,8 @@
 {
 	"manifest_version": 3,
 	"name": "EarthMC Dynmap+ (Cross-Browser Fork)",
-	"version": "2.1.4",
-	"author": "3meraldK",
+	"version": "2.1.5",
+	"author": "JasonSolace",
 	"description": "Extension to enrich the EarthMC map experience",
 	"icons": {
 		"48": "resources/icon48.png",
